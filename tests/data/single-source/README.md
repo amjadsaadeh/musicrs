@@ -4,7 +4,7 @@ Data for testing single source DOA estimation.
 
 ## Naming
 
-`single-source_<source frequency in Hz>Hz_<DOA in degree>deg_<duration in s>s.npy`
+`single-source_<source frequency in Hz>Hz_<DOA in degree>deg_<duration in s>s.wav`
 
 ## Content
 
