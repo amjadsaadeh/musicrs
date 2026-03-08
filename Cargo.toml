@@ -2,8 +2,19 @@
 name = "musicrs"
 version = "0.1.0"
 edition = "2024"
+description = "Rust port of the MUSIC (MUltiple SIgnal Classification) algorithm for Direction-of-Arrival estimation"
+license = "MIT"
+
+[lib]
+name = "musicrs"
+path = "src/lib.rs"
 
 [dependencies]
+nalgebra    = "0.33"
+num-complex = "0.4"
+rustfft     = "6"
+faer        = "0.19"
 
 [dev-dependencies]
-hound = "3.5.1"
+hound  = "3.5.1"
+approx = "0.5"
