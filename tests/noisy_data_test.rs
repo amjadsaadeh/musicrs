@@ -6,10 +6,10 @@
 // ground-truth angle encoded in the filename.
 
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
-use nalgebra::DMatrix;
 use musicrs::{MusicEstimator, analytic_signal};
+use nalgebra::DMatrix;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Minimal seeded PRNG (LCG) + Box-Muller for Gaussian noise
@@ -23,7 +23,9 @@ struct Lcg {
 
 impl Lcg {
     fn new(seed: u64) -> Self {
-        Self { state: seed.wrapping_add(1) }
+        Self {
+            state: seed.wrapping_add(1),
+        }
     }
 
     /// Returns a uniform sample in `(0, 1]`.
@@ -66,8 +68,8 @@ fn add_white_noise(signal: &DMatrix<f64>, snr_db: f64, seed: u64) -> DMatrix<f64
     let n_samples = signal.ncols();
 
     // Mean signal power across all channels and samples
-    let signal_power: f64 = signal.iter().map(|x| x * x).sum::<f64>()
-        / (n_channels * n_samples) as f64;
+    let signal_power: f64 =
+        signal.iter().map(|x| x * x).sum::<f64>() / (n_channels * n_samples) as f64;
 
     // Desired noise standard deviation derived from the target SNR
     let noise_std = (signal_power / 10.0_f64.powf(snr_db / 10.0)).sqrt();
@@ -110,7 +112,7 @@ fn read_wav_4ch(path: &PathBuf) -> (u32, DMatrix<f64>) {
 
 /// Parse metadata from a test-data filename.
 /// Format: `single-source_<freq>Hz_<doa>deg_<duration>s.wav`
-fn parse_test_file_meta_params(path: &PathBuf) -> Option<Vec<String>> {
+fn parse_test_file_meta_params(path: &Path) -> Option<Vec<String>> {
     path.file_name()
         .and_then(|name| name.to_str())
         .map(|file_name| {
@@ -145,16 +147,8 @@ fn run_noisy_doa_test(snr_db: f64, tolerance_deg: f64) {
         let path = entry.unwrap().path();
         let parts = parse_test_file_meta_params(&path).unwrap();
 
-        let freq_hz: f64 = parts[1]
-            .strip_suffix("Hz")
-            .unwrap()
-            .parse()
-            .unwrap();
-        let true_doa_deg: f64 = parts[2]
-            .strip_suffix("deg")
-            .unwrap()
-            .parse()
-            .unwrap();
+        let freq_hz: f64 = parts[1].strip_suffix("Hz").unwrap().parse().unwrap();
+        let true_doa_deg: f64 = parts[2].strip_suffix("deg").unwrap().parse().unwrap();
 
         // ── Read WAV, add noise, build complex signal matrix ──────────────────
         let (sample_rate, real_data) = read_wav_4ch(&path);
@@ -166,8 +160,7 @@ fn run_noisy_doa_test(snr_db: f64, tolerance_deg: f64) {
         let n_mics = noisy_data.nrows();
         let n_samples = noisy_data.ncols();
 
-        let mut complex_data =
-            DMatrix::<num_complex::Complex<f64>>::zeros(n_mics, n_samples);
+        let mut complex_data = DMatrix::<num_complex::Complex<f64>>::zeros(n_mics, n_samples);
         for m in 0..n_mics {
             let row: Vec<f64> = noisy_data.row(m).iter().copied().collect();
             let analytic = analytic_signal(&row);

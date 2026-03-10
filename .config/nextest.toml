@@ -1,0 +1,9 @@
+[profile.ci]
+# Emit JUnit XML for the test reporter action
+junit = { path = "junit.xml" }
+# Show output from failing tests immediately
+failure-output = "immediate"
+# Don't show output from passing tests
+success-output = "never"
+# Retry flaky tests once before marking as failed
+retries = 1

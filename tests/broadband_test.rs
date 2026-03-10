@@ -14,8 +14,8 @@
 
 use std::path::PathBuf;
 
-use nalgebra::DMatrix;
 use musicrs::MusicEstimator;
+use nalgebra::DMatrix;
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -44,8 +44,8 @@ fn wav_path(freq_hz: u32, doa_deg: u32, duration_s: &str) -> PathBuf {
 /// Read a 4-channel, 24-bit PCM WAV file and return a `(4 × n_samples)` matrix
 /// with amplitudes normalised to `[−1, 1]`.
 fn read_wav_4ch(path: &PathBuf) -> DMatrix<f64> {
-    let mut reader = hound::WavReader::open(path)
-        .unwrap_or_else(|e| panic!("Failed to open {:?}: {}", path, e));
+    let mut reader =
+        hound::WavReader::open(path).unwrap_or_else(|e| panic!("Failed to open {:?}: {}", path, e));
     let spec = reader.spec();
     assert_eq!(spec.channels, 4, "Expected 4-channel WAV");
     assert_eq!(spec.bits_per_sample, 24, "Expected 24-bit PCM");
@@ -147,7 +147,11 @@ fn find_peak_doa_deg(spectrum: &[f64], angles_rad: &[f64]) -> f64 {
 /// The result is clamped to `[1, nfft/2]` (DC and Nyquist are edge cases).
 fn freq_to_bin(freq_hz: f64, nfft: usize, sample_rate: f64) -> usize {
     let nyquist = sample_rate / 2.0;
-    let effective = if freq_hz > nyquist { sample_rate - freq_hz } else { freq_hz };
+    let effective = if freq_hz > nyquist {
+        sample_rate - freq_hz
+    } else {
+        freq_hz
+    };
     let bin = (effective * nfft as f64 / sample_rate).round() as usize;
     bin.clamp(1, nfft / 2)
 }
@@ -227,8 +231,7 @@ fn ifb_music_broadband_single_source_40deg_targeted_bins() {
         .map(|&f| freq_to_bin(f, NFFT, SAMPLE_RATE))
         .collect();
 
-    let (spectrum, angles) =
-        estimator.ifb_music_spectrum(&data, NFFT, 1, SAMPLE_RATE, Some(&bins));
+    let (spectrum, angles) = estimator.ifb_music_spectrum(&data, NFFT, 1, SAMPLE_RATE, Some(&bins));
 
     let estimated_deg = find_peak_doa_deg(&spectrum, &angles);
     let err = min_equivalent_error_deg(estimated_deg, 40.0);
@@ -337,8 +340,7 @@ fn ifb_music_broadband_mid_high_freqs_80deg() {
         .map(|&f| freq_to_bin(f, NFFT, SAMPLE_RATE))
         .collect();
 
-    let (spectrum, angles) =
-        estimator.ifb_music_spectrum(&data, NFFT, 1, SAMPLE_RATE, Some(&bins));
+    let (spectrum, angles) = estimator.ifb_music_spectrum(&data, NFFT, 1, SAMPLE_RATE, Some(&bins));
     let estimated_deg = find_peak_doa_deg(&spectrum, &angles);
     let err = min_equivalent_error_deg(estimated_deg, 80.0);
 
@@ -364,8 +366,7 @@ fn ifb_music_broadband_high_freqs_120deg() {
         .map(|&f| freq_to_bin(f, NFFT, SAMPLE_RATE))
         .collect();
 
-    let (spectrum, angles) =
-        estimator.ifb_music_spectrum(&data, NFFT, 1, SAMPLE_RATE, Some(&bins));
+    let (spectrum, angles) = estimator.ifb_music_spectrum(&data, NFFT, 1, SAMPLE_RATE, Some(&bins));
     let estimated_deg = find_peak_doa_deg(&spectrum, &angles);
     let err = min_equivalent_error_deg(estimated_deg, 120.0);
 
@@ -413,7 +414,13 @@ fn ifb_music_spectrum_angles_span_search_interval() {
     );
     // All angles are within [start, end)
     for &a in &angles {
-        assert!(a >= start && a < end, "Angle {:.4} rad outside [{:.4}, {:.4})", a, start, end);
+        assert!(
+            a >= start && a < end,
+            "Angle {:.4} rad outside [{:.4}, {:.4})",
+            a,
+            start,
+            end
+        );
     }
     let _ = PI; // suppress unused import warning
 }

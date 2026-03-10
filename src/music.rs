@@ -54,9 +54,7 @@ fn hermitian_eigen(mat: &CMatrix) -> (Vec<f64>, CMatrix) {
 
     // Sort by ascending (real) eigenvalue
     let mut order: Vec<usize> = (0..n).collect();
-    order.sort_unstable_by(|&a, &b| {
-        s_col.read(a).re.partial_cmp(&s_col.read(b).re).unwrap()
-    });
+    order.sort_unstable_by(|&a, &b| s_col.read(a).re.partial_cmp(&s_col.read(b).re).unwrap());
 
     let eigenvalues: Vec<f64> = order.iter().map(|&i| s_col.read(i).re).collect();
     // faer's selfadjoint_eigendecomposition returns eigenvectors with conjugated
@@ -195,7 +193,11 @@ impl MusicEstimator {
         // At exactly Nyquist (f == sr/2): analytic signal is real; noise subspace is
         // also real → use cos(phase) as a real steering vector.
         let nyquist = self.sample_rate / 2.0;
-        let phase_sign = if frequency > nyquist { -1.0_f64 } else { 1.0_f64 };
+        let phase_sign = if frequency > nyquist {
+            -1.0_f64
+        } else {
+            1.0_f64
+        };
         let at_nyquist = (frequency - nyquist).abs() < 0.5;
         CVec::from_iterator(
             self.n_antennas(),
@@ -225,7 +227,10 @@ impl MusicEstimator {
     /// Panics if `n_sources >= n_antennas`.
     pub fn noise_subspace(&self, cov: &CMatrix, n_sources: usize) -> CMatrix {
         let n = cov.nrows();
-        assert!(n_sources < n, "n_sources must be less than the number of antennas");
+        assert!(
+            n_sources < n,
+            "n_sources must be less than the number of antennas"
+        );
 
         // faer returns eigenvalues in ascending order; the first n_noise columns
         // are the noise subspace (smallest eigenvalues).
@@ -349,10 +354,13 @@ impl MusicEstimator {
             let frequency = bin as f64 * sampling_rate / nfft as f64;
 
             // Cross-spectral matrix averaged over time windows
+            // Pre-collect per-mic slices for this bin to avoid a range-indexed loop.
+            let bin_slices: Vec<&[Cplx]> = stfts.iter().map(|s| s[bin].as_slice()).collect();
             let mut cov = CMatrix::zeros(n_mics, n_mics);
-            for w in 0..n_windows {
-                let x: CVec = CVec::from_iterator(n_mics, (0..n_mics).map(|m| stfts[m][bin][w]));
-                cov += &x * x.adjoint();
+            for col in
+                (0..n_windows).map(|w| CVec::from_iterator(n_mics, bin_slices.iter().map(|s| s[w])))
+            {
+                cov += &col * col.adjoint();
             }
             let scale = Cplx::new(1.0 / n_windows as f64, 0.0);
             cov *= scale;
@@ -393,6 +401,7 @@ impl MusicEstimator {
 mod tests {
     use super::*;
     use approx::assert_abs_diff_eq;
+    use nalgebra::DVector as DVec;
 
     fn default_est() -> MusicEstimator {
         MusicEstimator::default()
@@ -595,7 +604,3 @@ mod tests {
         );
     }
 }
-
-// Bring DVector into scope for the diagonal helper used in tests
-#[allow(unused_imports)]
-use nalgebra::DVector as DVec;

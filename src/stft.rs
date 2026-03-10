@@ -38,13 +38,13 @@ pub fn analytic_signal(data: &[f64]) -> Vec<Complex<f64>> {
     // One-sided spectral window
     let half = n / 2;
     spectrum[0] *= 1.0; // DC – unchanged
-    for k in 1..half {
-        spectrum[k] *= 2.0;
+    for sample in spectrum.iter_mut().take(half).skip(1) {
+        *sample *= 2.0;
     }
     // Nyquist bin (index half) is kept unchanged when N is even
     // Negative-frequency bins are zeroed
-    for k in (half + 1)..n {
-        spectrum[k] = Complex::new(0.0, 0.0);
+    for sample in spectrum.iter_mut().take(n).skip(half + 1) {
+        *sample = Complex::new(0.0, 0.0);
     }
 
     // Inverse FFT
@@ -97,7 +97,8 @@ pub fn stft(data: &[f64], nfft: usize, no_overlap: usize) -> Vec<Vec<Complex<f64
     };
 
     // result[freq_bin][window_index]
-    let mut result: Vec<Vec<Complex<f64>>> = vec![vec![Complex::new(0.0, 0.0); num_windows]; freq_bins];
+    let mut result: Vec<Vec<Complex<f64>>> =
+        vec![vec![Complex::new(0.0, 0.0); num_windows]; freq_bins];
 
     for (win_idx, start) in (0..).zip((0..).step_by(step).take(num_windows)) {
         let end = start + nfft;
@@ -144,10 +145,10 @@ mod tests {
             .map(|i| (2.0 * PI * f0 * i as f64 / n as f64).cos())
             .collect();
         let z = analytic_signal(&data);
-        for i in 10..n - 10 {
+        for (i, zi) in z.iter().enumerate().take(n - 10).skip(10) {
             // H{cos(ωt)} = +sin(ωt), so z(t) = cos(ωt) + i·sin(ωt)
             let expected_imag = (2.0 * PI * f0 * i as f64 / n as f64).sin();
-            assert_abs_diff_eq!(z[i].im, expected_imag, epsilon = 0.02);
+            assert_abs_diff_eq!(zi.im, expected_imag, epsilon = 0.02);
         }
     }
 
@@ -186,7 +187,12 @@ mod tests {
         // In each window, bin `target_bin` should dominate
         for win in 0..result[0].len() {
             let peak_bin = (0..result.len())
-                .max_by(|&a, &b| result[a][win].norm().partial_cmp(&result[b][win].norm()).unwrap())
+                .max_by(|&a, &b| {
+                    result[a][win]
+                        .norm()
+                        .partial_cmp(&result[b][win].norm())
+                        .unwrap()
+                })
                 .unwrap();
             assert_eq!(peak_bin, target_bin);
         }

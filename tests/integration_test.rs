@@ -5,10 +5,10 @@
 // encodes the source frequency, true DOA, and duration.
 
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
-use nalgebra::DMatrix;
 use musicrs::{MusicEstimator, analytic_signal};
+use nalgebra::DMatrix;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -17,7 +17,7 @@ use musicrs::{MusicEstimator, analytic_signal};
 /// Parse metadata from a test-data filename.
 /// Format: `single-source_<freq>Hz_<doa>deg_<duration>s.wav`
 /// Returns `(frequency_hz, doa_degrees, duration_s)`.
-fn parse_test_file_meta_params(path: &PathBuf) -> Option<Vec<&str>> {
+fn parse_test_file_meta_params(path: &Path) -> Option<Vec<&str>> {
     path.file_name()
         .and_then(|name| name.to_str())
         .map(|file_name| {
@@ -87,21 +87,13 @@ fn test_single_source_doa() {
         let path = entry.unwrap().path();
         let parts = parse_test_file_meta_params(&path).unwrap();
 
-        let freq_hz: f64 = parts[1]
-            .strip_suffix("Hz")
-            .unwrap()
-            .parse::<f64>()
-            .unwrap();
+        let freq_hz: f64 = parts[1].strip_suffix("Hz").unwrap().parse::<f64>().unwrap();
         let true_doa_deg: f64 = parts[2]
             .strip_suffix("deg")
             .unwrap()
             .parse::<f64>()
             .unwrap();
-        let _duration_s: f64 = parts[3]
-            .strip_suffix("s")
-            .unwrap()
-            .parse::<f64>()
-            .unwrap();
+        let _duration_s: f64 = parts[3].strip_suffix("s").unwrap().parse::<f64>().unwrap();
 
         // ── Read WAV and build complex signal matrix ──────────────────────────
         let (sample_rate, real_data) = read_wav_4ch(&path);
@@ -184,4 +176,3 @@ fn test_single_source_doa() {
 
     println!("All {total} single-source DOA tests passed (tolerance ±{tolerance_deg:.0}°).");
 }
-
