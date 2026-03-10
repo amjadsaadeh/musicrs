@@ -97,7 +97,8 @@ pub fn stft(data: &[f64], nfft: usize, no_overlap: usize) -> Vec<Vec<Complex<f64
     };
 
     // result[freq_bin][window_index]
-    let mut result: Vec<Vec<Complex<f64>>> = vec![vec![Complex::new(0.0, 0.0); num_windows]; freq_bins];
+    let mut result: Vec<Vec<Complex<f64>>> =
+        vec![vec![Complex::new(0.0, 0.0); num_windows]; freq_bins];
 
     for (win_idx, start) in (0..).zip((0..).step_by(step).take(num_windows)) {
         let end = start + nfft;
@@ -186,7 +187,12 @@ mod tests {
         // In each window, bin `target_bin` should dominate
         for win in 0..result[0].len() {
             let peak_bin = (0..result.len())
-                .max_by(|&a, &b| result[a][win].norm().partial_cmp(&result[b][win].norm()).unwrap())
+                .max_by(|&a, &b| {
+                    result[a][win]
+                        .norm()
+                        .partial_cmp(&result[b][win].norm())
+                        .unwrap()
+                })
                 .unwrap();
             assert_eq!(peak_bin, target_bin);
         }

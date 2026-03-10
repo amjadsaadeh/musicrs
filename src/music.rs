@@ -54,9 +54,7 @@ fn hermitian_eigen(mat: &CMatrix) -> (Vec<f64>, CMatrix) {
 
     // Sort by ascending (real) eigenvalue
     let mut order: Vec<usize> = (0..n).collect();
-    order.sort_unstable_by(|&a, &b| {
-        s_col.read(a).re.partial_cmp(&s_col.read(b).re).unwrap()
-    });
+    order.sort_unstable_by(|&a, &b| s_col.read(a).re.partial_cmp(&s_col.read(b).re).unwrap());
 
     let eigenvalues: Vec<f64> = order.iter().map(|&i| s_col.read(i).re).collect();
     // faer's selfadjoint_eigendecomposition returns eigenvectors with conjugated
@@ -195,7 +193,11 @@ impl MusicEstimator {
         // At exactly Nyquist (f == sr/2): analytic signal is real; noise subspace is
         // also real → use cos(phase) as a real steering vector.
         let nyquist = self.sample_rate / 2.0;
-        let phase_sign = if frequency > nyquist { -1.0_f64 } else { 1.0_f64 };
+        let phase_sign = if frequency > nyquist {
+            -1.0_f64
+        } else {
+            1.0_f64
+        };
         let at_nyquist = (frequency - nyquist).abs() < 0.5;
         CVec::from_iterator(
             self.n_antennas(),
@@ -225,7 +227,10 @@ impl MusicEstimator {
     /// Panics if `n_sources >= n_antennas`.
     pub fn noise_subspace(&self, cov: &CMatrix, n_sources: usize) -> CMatrix {
         let n = cov.nrows();
-        assert!(n_sources < n, "n_sources must be less than the number of antennas");
+        assert!(
+            n_sources < n,
+            "n_sources must be less than the number of antennas"
+        );
 
         // faer returns eigenvalues in ascending order; the first n_noise columns
         // are the noise subspace (smallest eigenvalues).
