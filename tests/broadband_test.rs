@@ -72,6 +72,14 @@ fn read_wav_4ch(path: &PathBuf) -> DMatrix<f64> {
 /// All files are trimmed to the shortest available recording length before
 /// superimposition so that the matrix dimensions are consistent.
 fn load_composite_source(doa_deg: u32, freqs_hz: &[u32; 3], duration_s: &str) -> DMatrix<f64> {
+    load_composite_source_n(doa_deg, freqs_hz, duration_s)
+}
+
+/// Load an arbitrary number of single-frequency WAV files at the same `doa_deg`
+/// and sum them channel-by-channel.  All recordings are trimmed to the shortest
+/// length before superimposition.
+fn load_composite_source_n(doa_deg: u32, freqs_hz: &[u32], duration_s: &str) -> DMatrix<f64> {
+    assert!(!freqs_hz.is_empty(), "need at least one frequency");
     let signals: Vec<DMatrix<f64>> = freqs_hz
         .iter()
         .map(|&f| read_wav_4ch(&wav_path(f, doa_deg, duration_s)))
@@ -131,11 +139,16 @@ fn find_peak_doa_deg(spectrum: &[f64], angles_rad: &[f64]) -> f64 {
     peaks[0].1
 }
 
-/// Compute the STFT bin index closest to a given frequency.
+/// Compute the STFT bin index for a given frequency.
 ///
-/// `bin = round(freq_hz * nfft / sample_rate)`, clamped to `[1, nfft/2]`.
+/// For a real-valued STFT the single-sided spectrum covers `[0, sr/2]`.
+/// Frequencies above the Nyquist (`sr/2`) alias back into the passband at
+/// `sr − freq_hz`, so the bin is computed on the aliased frequency instead.
+/// The result is clamped to `[1, nfft/2]` (DC and Nyquist are edge cases).
 fn freq_to_bin(freq_hz: f64, nfft: usize, sample_rate: f64) -> usize {
-    let bin = (freq_hz * nfft as f64 / sample_rate).round() as usize;
+    let nyquist = sample_rate / 2.0;
+    let effective = if freq_hz > nyquist { sample_rate - freq_hz } else { freq_hz };
+    let bin = (effective * nfft as f64 / sample_rate).round() as usize;
     bin.clamp(1, nfft / 2)
 }
 
@@ -424,6 +437,155 @@ fn ifb_music_spectrum_empty_bins_returns_flat() {
             v
         );
     }
+}
+
+// ─── Broadband integration tests ─────────────────────────────────────────────
+//
+// These tests mirror the structure of `integration_test.rs` but exercise
+// IFB-MUSIC rather than narrowband MUSIC.  The composite source at each angle
+// is formed by superimposing *all* available single-frequency recordings at
+// that DOA, making the signal genuinely broadband across the entire test
+// frequency range (300 Hz – 9.1 kHz).
+
+/// All nine available test frequencies (Hz), matching the WAV file corpus.
+const ALL_FREQS: [u32; 9] = [300, 1400, 2500, 3600, 4700, 5800, 6900, 8000, 9100];
+
+/// All five ground-truth DOA angles (degrees) in the test corpus.
+const ALL_ANGLES_DEG: [u32; 5] = [0, 40, 80, 120, 160];
+
+/// IFB-MUSIC correctly estimates the DOA of a nine-tone broadband single source
+/// at every available ground-truth angle.
+///
+/// For each angle in {0°, 40°, 80°, 120°, 160°} the nine single-frequency
+/// recordings at that angle (300 – 9100 Hz) are summed to form a composite
+/// signal.  IFB-MUSIC is run with targeted STFT bins at each component
+/// frequency.  The estimated DOA must be within ±5° of the true angle
+/// (accounting for the linear-array mirror ambiguity).
+///
+/// All failures are collected and reported together at the end.
+#[test]
+fn test_broadband_single_source_doa_nine_tone() {
+    let estimator = MusicEstimator::default();
+    let tolerance_deg = TOL_TARGETED;
+
+    let bins: Vec<usize> = ALL_FREQS
+        .iter()
+        .map(|&f| freq_to_bin(f as f64, NFFT, SAMPLE_RATE))
+        .collect();
+
+    let mut failures: Vec<String> = Vec::new();
+
+    for &doa_deg in &ALL_ANGLES_DEG {
+        let data = load_composite_source_n(doa_deg, &ALL_FREQS, "2.0s");
+
+        let (spectrum, angles) =
+            estimator.ifb_music_spectrum(&data, NFFT, 1, SAMPLE_RATE, Some(&bins));
+        let estimated_deg = find_peak_doa_deg(&spectrum, &angles);
+        let err = min_equivalent_error_deg(estimated_deg, doa_deg as f64);
+
+        if err > tolerance_deg {
+            failures.push(format!(
+                "DOA {}°: expected {:.1}° (or {:.1}°), got {:.1}° (error {:.1}°)",
+                doa_deg,
+                doa_deg as f64,
+                360.0 - doa_deg as f64,
+                estimated_deg,
+                err
+            ));
+        }
+    }
+
+    if !failures.is_empty() {
+        panic!(
+            "{}/{} angles failed nine-tone IFB-MUSIC test (tolerance ±{:.0}°):\n{}",
+            failures.len(),
+            ALL_ANGLES_DEG.len(),
+            tolerance_deg,
+            failures.join("\n")
+        );
+    }
+
+    println!(
+        "All {} nine-tone broadband DOA tests passed (tolerance ±{:.0}°).",
+        ALL_ANGLES_DEG.len(),
+        tolerance_deg
+    );
+}
+
+/// IFB-MUSIC correctly estimates the DOA of composite broadband sources formed
+/// from every distinct low / mid / high frequency triple available in the test
+/// corpus, across all five ground-truth angles.
+///
+/// The frequencies are divided into three sub-Nyquist spectral bands (all ≤ 8 kHz;
+/// 9100 Hz is excluded because it lies above the 8 kHz Nyquist and its energy
+/// appears at the aliased bin 6900 Hz in the single-sided STFT, making the
+/// steering-vector frequency ambiguous — that case is covered by the narrowband
+/// `test_single_source_doa` test which uses the correct sign-flip convention):
+///  - Low : 300, 1400, 2500 Hz
+///  - Mid : 3600, 4700, 5800 Hz
+///  - High: 6900, 8000 Hz
+///
+/// Tested triples are all 18 combinations (one frequency from each band), giving
+/// 18 × 5 = 90 (angle, triple) pairs.  IFB-MUSIC is run with three targeted
+/// STFT bins — one per component.  Tolerance: ±5°.
+///
+/// All failures are collected and reported together at the end.
+#[test]
+fn test_broadband_single_source_doa_frequency_triples() {
+    let estimator = MusicEstimator::default();
+    let tolerance_deg = TOL_TARGETED;
+
+    let low_band: [u32; 3] = [300, 1400, 2500];
+    let mid_band: [u32; 3] = [3600, 4700, 5800];
+    // 9100 Hz is above the 8 kHz Nyquist; limit high band to sub-Nyquist only.
+    let high_band: [u32; 2] = [6900, 8000];
+
+    let mut failures: Vec<String> = Vec::new();
+    let mut total = 0usize;
+
+    for &fl in &low_band {
+        for &fm in &mid_band {
+            for &fh in &high_band {
+                let triple = [fl, fm, fh];
+                let bins: Vec<usize> = triple
+                    .iter()
+                    .map(|&f| freq_to_bin(f as f64, NFFT, SAMPLE_RATE))
+                    .collect();
+
+                for &doa_deg in &ALL_ANGLES_DEG {
+                    let data = load_composite_source(doa_deg, &triple, "2.0s");
+
+                    let (spectrum, angles) =
+                        estimator.ifb_music_spectrum(&data, NFFT, 1, SAMPLE_RATE, Some(&bins));
+                    let estimated_deg = find_peak_doa_deg(&spectrum, &angles);
+                    let err = min_equivalent_error_deg(estimated_deg, doa_deg as f64);
+
+                    if err > tolerance_deg {
+                        failures.push(format!(
+                            "DOA {}°, triple {}+{}+{} Hz (bins {:?}): got {:.1}° (error {:.1}°)",
+                            doa_deg, fl, fm, fh, bins, estimated_deg, err
+                        ));
+                    }
+                    total += 1;
+                }
+            }
+        }
+    }
+
+    if !failures.is_empty() {
+        panic!(
+            "{}/{} (angle, triple) pairs failed IFB-MUSIC frequency-triple test \
+             (tolerance ±{:.0}°):\n{}",
+            failures.len(),
+            total,
+            tolerance_deg,
+            failures.join("\n")
+        );
+    }
+
+    println!(
+        "All {total} (angle, triple) broadband DOA tests passed (tolerance ±{tolerance_deg:.0}°)."
+    );
 }
 
 /// Spectrum values are all finite and positive (using targeted bins).
