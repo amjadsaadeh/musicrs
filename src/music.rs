@@ -354,10 +354,13 @@ impl MusicEstimator {
             let frequency = bin as f64 * sampling_rate / nfft as f64;
 
             // Cross-spectral matrix averaged over time windows
+            // Pre-collect per-mic slices for this bin to avoid a range-indexed loop.
+            let bin_slices: Vec<&[Cplx]> = stfts.iter().map(|s| s[bin].as_slice()).collect();
             let mut cov = CMatrix::zeros(n_mics, n_mics);
-            for w in 0..n_windows {
-                let x: CVec = CVec::from_iterator(n_mics, (0..n_mics).map(|m| stfts[m][bin][w]));
-                cov += &x * x.adjoint();
+            for col in
+                (0..n_windows).map(|w| CVec::from_iterator(n_mics, bin_slices.iter().map(|s| s[w])))
+            {
+                cov += &col * col.adjoint();
             }
             let scale = Cplx::new(1.0 / n_windows as f64, 0.0);
             cov *= scale;
@@ -398,6 +401,7 @@ impl MusicEstimator {
 mod tests {
     use super::*;
     use approx::assert_abs_diff_eq;
+    use nalgebra::DVector as DVec;
 
     fn default_est() -> MusicEstimator {
         MusicEstimator::default()
@@ -600,7 +604,3 @@ mod tests {
         );
     }
 }
-
-// Bring DVector into scope for the diagonal helper used in tests
-#[allow(unused_imports)]
-use nalgebra::DVector as DVec;

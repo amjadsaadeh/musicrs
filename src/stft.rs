@@ -38,13 +38,13 @@ pub fn analytic_signal(data: &[f64]) -> Vec<Complex<f64>> {
     // One-sided spectral window
     let half = n / 2;
     spectrum[0] *= 1.0; // DC – unchanged
-    for k in 1..half {
-        spectrum[k] *= 2.0;
+    for sample in spectrum.iter_mut().take(half).skip(1) {
+        *sample *= 2.0;
     }
     // Nyquist bin (index half) is kept unchanged when N is even
     // Negative-frequency bins are zeroed
-    for k in (half + 1)..n {
-        spectrum[k] = Complex::new(0.0, 0.0);
+    for sample in spectrum.iter_mut().take(n).skip(half + 1) {
+        *sample = Complex::new(0.0, 0.0);
     }
 
     // Inverse FFT
@@ -145,10 +145,10 @@ mod tests {
             .map(|i| (2.0 * PI * f0 * i as f64 / n as f64).cos())
             .collect();
         let z = analytic_signal(&data);
-        for i in 10..n - 10 {
+        for (i, zi) in z.iter().enumerate().take(n - 10).skip(10) {
             // H{cos(ωt)} = +sin(ωt), so z(t) = cos(ωt) + i·sin(ωt)
             let expected_imag = (2.0 * PI * f0 * i as f64 / n as f64).sin();
-            assert_abs_diff_eq!(z[i].im, expected_imag, epsilon = 0.02);
+            assert_abs_diff_eq!(zi.im, expected_imag, epsilon = 0.02);
         }
     }
 

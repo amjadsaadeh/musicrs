@@ -5,7 +5,7 @@
 // encodes the source frequency, true DOA, and duration.
 
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use musicrs::{MusicEstimator, analytic_signal};
 use nalgebra::DMatrix;
@@ -17,7 +17,7 @@ use nalgebra::DMatrix;
 /// Parse metadata from a test-data filename.
 /// Format: `single-source_<freq>Hz_<doa>deg_<duration>s.wav`
 /// Returns `(frequency_hz, doa_degrees, duration_s)`.
-fn parse_test_file_meta_params(path: &PathBuf) -> Option<Vec<&str>> {
+fn parse_test_file_meta_params(path: &Path) -> Option<Vec<&str>> {
     path.file_name()
         .and_then(|name| name.to_str())
         .map(|file_name| {

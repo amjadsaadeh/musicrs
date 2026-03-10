@@ -6,7 +6,7 @@
 // ground-truth angle encoded in the filename.
 
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use musicrs::{MusicEstimator, analytic_signal};
 use nalgebra::DMatrix;
@@ -112,7 +112,7 @@ fn read_wav_4ch(path: &PathBuf) -> (u32, DMatrix<f64>) {
 
 /// Parse metadata from a test-data filename.
 /// Format: `single-source_<freq>Hz_<doa>deg_<duration>s.wav`
-fn parse_test_file_meta_params(path: &PathBuf) -> Option<Vec<String>> {
+fn parse_test_file_meta_params(path: &Path) -> Option<Vec<String>> {
     path.file_name()
         .and_then(|name| name.to_str())
         .map(|file_name| {
