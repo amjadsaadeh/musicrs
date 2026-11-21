@@ -75,7 +75,12 @@ fn hermitian_eigen(mat: &CMatrix) -> (Vec<f64>, CMatrix) {
 
 /// Returns the angles corresponding to the `n` largest local maxima in `scores`,
 /// sorted by descending peak height.
-fn find_peaks(scores: &[f64], angles: &[f64], n: usize) -> Vec<f64> {
+///
+/// A point is a peak when it is strictly greater than each of its neighbours. With
+/// `circular` (the grid covers the full circle), the first and last points are
+/// neighbours. Otherwise they are the two ends of an open range and each has only one
+/// neighbour, so a spectrum still rising at an end of the range peaks there.
+fn find_peaks(scores: &[f64], angles: &[f64], n: usize, circular: bool) -> Vec<f64> {
     let len = scores.len();
     if len == 0 || n == 0 {
         return Vec::new();
@@ -83,9 +88,17 @@ fn find_peaks(scores: &[f64], angles: &[f64], n: usize) -> Vec<f64> {
 
     let mut peaks: Vec<(f64, f64)> = (0..len)
         .filter_map(|i| {
-            let prev = scores[(i + len - 1) % len];
-            let next = scores[(i + 1) % len];
-            if scores[i] > prev && scores[i] > next {
+            let prev = match i {
+                0 if circular => Some(scores[len - 1]),
+                0 => None,
+                _ => Some(scores[i - 1]),
+            };
+            let next = match i + 1 {
+                j if j < len => Some(scores[j]),
+                _ if circular => Some(scores[0]),
+                _ => None,
+            };
+            if prev.is_none_or(|p| scores[i] > p) && next.is_none_or(|q| scores[i] > q) {
                 Some((scores[i], angles[i]))
             } else {
                 None
@@ -118,7 +131,9 @@ pub struct MusicEstimator {
     pub antenna_positions: Vec<[f64; 2]>,
     /// Number of angle steps in the angular search grid.
     pub angle_steps_num: usize,
-    /// Angular search range `(start_rad, end_rad)`.
+    /// Angular search range `(start_rad, end_rad)`; the grid includes `start_rad` and
+    /// excludes `end_rad`. A range spanning exactly 2π is treated as the full circle (its
+    /// ends are adjacent when picking peaks); any other range is open at both ends.
     pub search_interval: (f64, f64),
     /// Sample rate of the input signal in Hz, used to determine the sign convention
     /// for the steering vector (positive exponent for f < sr/2, negative for f ≥ sr/2).
@@ -164,6 +179,13 @@ impl MusicEstimator {
     #[inline]
     pub fn n_antennas(&self) -> usize {
         self.antenna_positions.len()
+    }
+
+    /// Whether [`search_interval`](Self::search_interval) spans exactly the full circle,
+    /// so that the first and last grid angles are neighbours.
+    fn covers_full_circle(&self) -> bool {
+        let (start, end) = self.search_interval;
+        ((end - start).abs() - 2.0 * PI).abs() <= 1e-9
     }
 
     // ─── Core algorithm ───────────────────────────────────────────────────────
@@ -289,7 +311,7 @@ impl MusicEstimator {
         let cov = (data * data.adjoint()).scale(1.0 / n_samples);
         let noise_mat = self.noise_subspace(&cov, n_sources);
         let (scores, angles) = self.spectrum(&noise_mat, frequency);
-        find_peaks(&scores, &angles, n_sources)
+        find_peaks(&scores, &angles, n_sources, self.covers_full_circle())
     }
 
     /// Estimates DOAs from real-valued microphone data, like pyMUSIC's `getSourceAngles`.
@@ -498,7 +520,7 @@ mod tests {
 
         let noise = est.noise_subspace(&cov, 1);
         let (scores, angles) = est.spectrum(&noise, freq);
-        let peaks = find_peaks(&scores, &angles, 1);
+        let peaks = find_peaks(&scores, &angles, 1, true);
         assert_eq!(peaks.len(), 1);
         let diff = (peaks[0] - true_angle).abs();
         let diff_wrapped = diff.min(2.0 * PI - diff);
@@ -624,9 +646,52 @@ mod tests {
     fn find_peaks_returns_top_n() {
         let scores = vec![0.1, 1.0, 0.1, 0.1, 2.0, 0.1, 0.1, 3.0, 0.1];
         let angles: Vec<f64> = (0..scores.len()).map(|i| i as f64).collect();
-        let peaks = find_peaks(&scores, &angles, 2);
+        let peaks = find_peaks(&scores, &angles, 2, true);
         assert_eq!(peaks.len(), 2);
         assert_abs_diff_eq!(peaks[0], 7.0, epsilon = 1e-12); // highest peak first
+    }
+
+    /// On the full circle the first point is a neighbour of the last one.
+    #[test]
+    fn find_peaks_circular_wraps_around() {
+        let angles = [0.0, 1.0, 2.0, 3.0, 4.0];
+        // Index 4 is a peak only through its wrapped neighbour at index 0
+        assert_eq!(
+            find_peaks(&[4.0, 1.0, 1.0, 1.0, 5.0], &angles, 5, true),
+            [4.0]
+        );
+        // Index 0 is a peak only through its wrapped neighbour at index 4
+        assert_eq!(
+            find_peaks(&[5.0, 1.0, 1.0, 1.0, 4.0], &angles, 5, true),
+            [0.0]
+        );
+    }
+
+    /// On an open range the ends are not neighbours: each is compared to its one neighbour.
+    #[test]
+    fn find_peaks_open_range_keeps_both_ends() {
+        let angles = [0.0, 1.0, 2.0, 3.0, 4.0];
+        assert_eq!(
+            find_peaks(&[4.0, 1.0, 1.0, 1.0, 5.0], &angles, 5, false),
+            [4.0, 0.0]
+        );
+        // An end lower than its neighbour is not a peak
+        assert_eq!(
+            find_peaks(&[1.0, 2.0, 3.0, 2.0, 1.0], &angles, 5, false),
+            [2.0]
+        );
+    }
+
+    #[test]
+    fn covers_full_circle_only_for_2pi_span() {
+        let with_interval = |interval| MusicEstimator {
+            search_interval: interval,
+            ..MusicEstimator::default()
+        };
+        assert!(with_interval((0.0, 2.0 * PI)).covers_full_circle());
+        assert!(with_interval((-PI, PI)).covers_full_circle());
+        assert!(!with_interval((0.0, PI)).covers_full_circle());
+        assert!(!with_interval((0.0, 1.9 * PI)).covers_full_circle());
     }
 
     // ── estimate_doa (synthetic noiseless plane wave) ─────────────────────────
@@ -657,6 +722,63 @@ mod tests {
             "Expected ~{:.1}°, got {:.1}°",
             true_angle.to_degrees(),
             angles[0].to_degrees()
+        );
+    }
+
+    // ── find_peaks on partial search ranges ───────────────────────────────────
+
+    /// Deterministic pseudo-random phases in [0, 2π) (LCG), so the two test sources are
+    /// uncorrelated without pulling in a `rand` dependency.
+    fn pseudo_random_phases(n: usize, seed: u64) -> Vec<f64> {
+        let mut state = seed;
+        (0..n)
+            .map(|_| {
+                state = state
+                    .wrapping_mul(6_364_136_223_846_793_005)
+                    .wrapping_add(1_442_695_040_888_963_407);
+                2.0 * PI * (state >> 11) as f64 / (1u64 << 53) as f64
+            })
+            .collect()
+    }
+
+    /// Two uncorrelated sources sitting on the first and last grid angles of a half-circle
+    /// search range. Both are true peaks; the first and last grid points are not neighbours,
+    /// so neither may be compared against the other.
+    #[test]
+    fn estimate_doa_finds_sources_at_both_ends_of_half_circle() {
+        let steps = 360;
+        let est = MusicEstimator::new(
+            DEFAULT_ANTENNA_POSITIONS.to_vec(),
+            steps,
+            (0.0, PI),
+            16000.0,
+        );
+        let first = 0.0;
+        let last = PI * (steps - 1) as f64 / steps as f64;
+        let frequency = 1000.0;
+        let n_samples = 4000;
+
+        let a1 = est.steering_vector(first, frequency);
+        let a2 = est.steering_vector(last, frequency);
+        let phases = pseudo_random_phases(n_samples, 7);
+        let noise = pseudo_random_phases(4 * n_samples, 11);
+        let data = CMatrix::from_fn(est.n_antennas(), n_samples, |m, t| {
+            let carrier = 2.0 * PI * frequency * t as f64 / est.sample_rate;
+            a1[m] * Cplx::from_polar(1.0, carrier)
+                + a2[m] * Cplx::from_polar(1.0, carrier + phases[t])
+                + Cplx::from_polar(0.05, noise[m * n_samples + t])
+        });
+
+        let mut found: Vec<f64> = est.estimate_doa(&data, 2, frequency);
+        found.sort_by(f64::total_cmp);
+        let step = PI / steps as f64;
+        assert_eq!(found.len(), 2, "expected two peaks, got {found:?}");
+        assert!(
+            (found[0] - first).abs() < 0.5 * step && (found[1] - last).abs() < 0.5 * step,
+            "expected peaks at {:.2}° and {:.2}°, got {:?}",
+            first.to_degrees(),
+            last.to_degrees(),
+            found.iter().map(|a| a.to_degrees()).collect::<Vec<_>>()
         );
     }
 }
