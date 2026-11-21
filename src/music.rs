@@ -615,6 +615,67 @@ mod tests {
         }
     }
 
+    /// `exp(+j·2π·f·τⱼ)` with `τⱼ = (pⱼ·d̂)/c`, written out independently of
+    /// `steering_vector`.
+    fn expected_steering(est: &MusicEstimator, angle: f64, frequency: f64) -> Vec<Cplx> {
+        est.antenna_positions
+            .iter()
+            .map(|p| {
+                let tau = (p[0] * angle.cos() + p[1] * angle.sin()) / SPEED_OF_SOUND;
+                Cplx::from_polar(1.0, 2.0 * PI * frequency * tau)
+            })
+            .collect()
+    }
+
+    fn assert_cplx_eq(got: Cplx, expected: Cplx) {
+        assert_abs_diff_eq!(got.re, expected.re, epsilon = 1e-12);
+        assert_abs_diff_eq!(got.im, expected.im, epsilon = 1e-12);
+    }
+
+    /// Below Nyquist, element j is `exp(+j·2π·f·τⱼ)` (musicrs's sign convention).
+    #[test]
+    fn steering_vector_phase_below_nyquist() {
+        let est = MusicEstimator {
+            antenna_positions: vec![[0.1, 0.0], [0.0, 0.07], [-0.05, -0.03]],
+            ..default_est()
+        };
+        for (angle, f) in [(0.7, 1200.0), (2.5, 300.0), (4.0, 7999.0)] {
+            let sv = est.steering_vector(angle, f);
+            for (&got, want) in sv.iter().zip(expected_steering(&est, angle, f)) {
+                assert_cplx_eq(got, want);
+            }
+        }
+    }
+
+    /// Above Nyquist the phase sign flips: the vector is the conjugate of the formula.
+    #[test]
+    fn steering_vector_conjugated_above_nyquist() {
+        let est = default_est();
+        let (angle, f) = (0.7, 9100.0);
+        let sv = est.steering_vector(angle, f);
+        for (&got, want) in sv.iter().zip(expected_steering(&est, angle, f)) {
+            assert_cplx_eq(got, want.conj());
+        }
+    }
+
+    /// Within 0.5 Hz of Nyquist the vector is real, `cos(2π·f·τⱼ)`; just outside it is not.
+    #[test]
+    fn steering_vector_real_at_nyquist() {
+        let est = default_est();
+        let angle = 0.7;
+        for f in [8000.0, 7999.6, 8000.4] {
+            let sv = est.steering_vector(angle, f);
+            for (&got, want) in sv.iter().zip(expected_steering(&est, angle, f)) {
+                assert_cplx_eq(got, Cplx::new(want.re, 0.0));
+            }
+        }
+        let above = est.steering_vector(angle, 8000.6);
+        assert!(
+            above.iter().any(|c| c.im.abs() > 1e-3),
+            "8000.6 Hz should be complex"
+        );
+    }
+
     /// Single element at origin → zero delay → phase = 1+0j for all angles.
     #[test]
     fn steering_vector_origin_element() {
