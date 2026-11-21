@@ -212,6 +212,34 @@ mod tests {
         assert_eq!(result[0].len(), expected_windows);
     }
 
+    #[test]
+    #[should_panic(expected = "nfft must be at least 1")]
+    fn stft_rejects_zero_nfft() {
+        stft(&[0.0; 8], 0, 0);
+    }
+
+    #[test]
+    #[should_panic(expected = "no_overlap must be less than nfft")]
+    fn stft_rejects_overlap_of_whole_window() {
+        stft(&[0.0; 8], 4, 4);
+    }
+
+    /// With overlap, window w starts at sample w·(nfft − no_overlap): its DC bin is the sum
+    /// of exactly those samples.
+    #[test]
+    fn stft_overlapping_windows_start_at_step() {
+        let data: Vec<f64> = (0..20).map(f64::from).collect();
+        let (nfft, overlap) = (8, 5);
+        let result = stft(&data, nfft, overlap);
+        assert_eq!(result[0].len(), 5); // (20 − 8) / 3 + 1
+        for (w, dc) in result[0].iter().enumerate() {
+            let start = w * (nfft - overlap);
+            let expected: f64 = data[start..start + nfft].iter().sum();
+            assert_abs_diff_eq!(dc.re, expected, epsilon = 1e-9);
+            assert_abs_diff_eq!(dc.im, 0.0, epsilon = 1e-9);
+        }
+    }
+
     /// STFT freq_bins = nfft/2 + 1.
     #[test]
     fn stft_freq_bins() {
