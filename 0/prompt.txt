@@ -1,0 +1,1 @@
+yes, add energy-based bin selection on a new branch. in a subagenr
