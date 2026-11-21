@@ -84,6 +84,7 @@ Test data covers:
   - `feat/<feature-name>` for new features
   - `fix/<bugfix-name>` for bug fixes
 - Structure work in reasonably sized commits: each commit is one logical change that builds and passes tests on its own.
+- A project Stop hook (`.claude/settings.json` → `.claude/hooks/run-tests.sh`) runs `cargo test` when a turn ends with changed code under `src/`, `tests/` or `Cargo.*`, and sends failures back to Claude. Tests slower than ~10 s are listed in `.claude/hooks/slow-tests.txt` and skipped there; run plain `cargo test` for the full suite. Set `MUSICRS_SKIP_HOOK_TESTS=1` before starting Claude Code to turn the hook off.
 
 ## Notes
 
