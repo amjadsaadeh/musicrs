@@ -6,7 +6,7 @@ use nalgebra::DMatrix;
 use nalgebra::DVector;
 use num_complex::Complex;
 
-use crate::stft::stft;
+use crate::stft::{analytic_signal, stft};
 
 /// Speed of sound in air at ~20 °C, in metres per second.
 const SPEED_OF_SOUND: f64 = 343.2;
@@ -57,9 +57,9 @@ fn hermitian_eigen(mat: &CMatrix) -> (Vec<f64>, CMatrix) {
     order.sort_unstable_by(|&a, &b| s_col.read(a).re.partial_cmp(&s_col.read(b).re).unwrap());
 
     let eigenvalues: Vec<f64> = order.iter().map(|&i| s_col.read(i).re).collect();
-    // faer's selfadjoint_eigendecomposition returns eigenvectors with conjugated
-    // imaginary parts relative to the signal-processing convention.  Negate im to
-    // recover the eigenvectors in the standard A·v = λ·v convention expected by MUSIC.
+    // Copy the eigenvectors (reordered by ascending eigenvalue) back into nalgebra.
+    // faer's eigenvectors already satisfy A·v = λ·v, so no conjugation is applied;
+    // the steering-vector sign convention in `steering_vector` is matched to this.
     let eigenvectors: CMatrix = CMatrix::from_fn(n, n, |row, col| {
         let src_col = order[col];
         let c = u_mat.read(row, src_col);
@@ -292,6 +292,59 @@ impl MusicEstimator {
         find_peaks(&scores, &angles, n_sources)
     }
 
+    /// Estimates DOAs from real-valued microphone data, like pyMUSIC's `getSourceAngles`.
+    ///
+    /// Converts each channel to its analytic signal with [`analytic_signal`] and then
+    /// calls [`estimate_doa`](Self::estimate_doa).
+    ///
+    /// # Arguments
+    /// * `data`      – Real array data (n_antennas × n_samples), approximately zero mean.
+    /// * `n_sources` – Number of sources to detect.
+    /// * `frequency` – Signal frequency in Hz.
+    ///
+    /// # Panics
+    /// Panics if the number of rows of `data` differs from the number of antennas.
+    ///
+    /// # Examples
+    /// ```
+    /// use musicrs::MusicEstimator;
+    /// use nalgebra::DMatrix;
+    /// use std::f64::consts::PI;
+    ///
+    /// let est = MusicEstimator::default();
+    /// let (freq, doa, sr) = (1000.0, 60.0_f64.to_radians(), est.sample_rate);
+    /// // Plane wave: microphone j hears the source delayed by -(p_j · d) / c
+    /// let data = DMatrix::from_fn(4, 4000, |j, t| {
+    ///     let p = est.antenna_positions[j];
+    ///     let advance = (p[0] * doa.cos() + p[1] * doa.sin()) / 343.2;
+    ///     (2.0 * PI * freq * (t as f64 / sr + advance)).cos()
+    /// });
+    /// let angles = est.estimate_doa_from_real(&data, 1, freq);
+    /// // A linear array cannot tell θ from 360° − θ
+    /// let deg = angles[0].to_degrees();
+    /// assert!((deg - 60.0).abs() < 2.0 || (deg - 300.0).abs() < 2.0, "got {deg}");
+    /// ```
+    pub fn estimate_doa_from_real(
+        &self,
+        data: &DMatrix<f64>,
+        n_sources: usize,
+        frequency: f64,
+    ) -> Vec<f64> {
+        assert_eq!(
+            data.nrows(),
+            self.n_antennas(),
+            "data must have one row per antenna"
+        );
+        let mut complex = CMatrix::zeros(data.nrows(), data.ncols());
+        for m in 0..data.nrows() {
+            let row: Vec<f64> = data.row(m).iter().copied().collect();
+            for (t, c) in analytic_signal(&row).into_iter().enumerate() {
+                complex[(m, t)] = c;
+            }
+        }
+        self.estimate_doa(&complex, n_sources, frequency)
+    }
+
     /// Integrated Frequency-Band (IFB) MUSIC spectrum.
     ///
     /// Computes a narrowband MUSIC spectrum at each frequency bin and combines them
@@ -301,8 +354,12 @@ impl MusicEstimator {
     /// * `data`          – Real-valued microphone data (n_antennas × n_samples).
     /// * `nfft`          – STFT window size.
     /// * `n_sources`     – Number of sources.
-    /// * `sampling_rate` – Sample rate in Hz.
     /// * `bins`          – Frequency bin indices to use; `None` uses all bins except DC.
+    ///
+    /// Bin frequencies are derived from [`MusicEstimator::sample_rate`], the same rate
+    /// [`steering_vector`](Self::steering_vector) uses for its Nyquist handling.
+    /// Bins only cover `[0, sample_rate / 2]`, so a tone recorded above Nyquist is
+    /// steered at its aliased frequency and its DOA cannot be recovered here.
     ///
     /// # Returns
     /// `(spectrum, angles)` — the IFB-MUSIC spectrum and corresponding angles.
@@ -311,7 +368,6 @@ impl MusicEstimator {
         data: &DMatrix<f64>,
         nfft: usize,
         n_sources: usize,
-        sampling_rate: f64,
         bins: Option<&[usize]>,
     ) -> (Vec<f64>, Vec<f64>) {
         let n_mics = data.nrows();
@@ -351,7 +407,7 @@ impl MusicEstimator {
             if bin >= freq_bins {
                 continue;
             }
-            let frequency = bin as f64 * sampling_rate / nfft as f64;
+            let frequency = bin as f64 * self.sample_rate / nfft as f64;
 
             // Cross-spectral matrix averaged over time windows
             // Pre-collect per-mic slices for this bin to avoid a range-indexed loop.

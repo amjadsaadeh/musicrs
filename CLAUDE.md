@@ -15,6 +15,8 @@ cargo build --release
 cargo test              # all tests (unit + integration)
 cargo test --lib        # unit tests only
 cargo test --test '*'   # integration tests only
+cargo test --test golden_test   # parity with the original pyMUSIC spectra
+cargo clippy --all-targets -- -D warnings   # CI runs this and `cargo fmt --check`
 
 # Documentation
 cargo doc --open
@@ -28,12 +30,20 @@ src/
 ├── music.rs    # Core MUSIC algorithm (MusicEstimator, spectrum, DOA estimation)
 └── stft.rs     # Signal processing (STFT, analytic signal via Hilbert transform)
 tests/
-├── integration_test.rs          # End-to-end tests against WAV recordings
+├── common/mod.rs                # Shared WAV/filename/angle helpers
+├── integration_test.rs          # Narrowband DOA on every WAV recording (±5°)
+├── ifb_test.rs                  # IFB-MUSIC on the tone's bin (nfft 160), below Nyquist (±5°)
+├── golden_test.rs               # Spectra vs. original pyMUSIC output in tests/golden/
+├── broadband_test.rs            # IFB-MUSIC on composite multi-tone signals
+├── noisy_data_test.rs           # Narrowband DOA with added white noise
+├── golden/                      # pyMUSIC reference CSVs + generate_golden.py
 └── data/single-source/*.wav     # 4-channel 24-bit 16kHz test recordings
 ```
 
 **Key types:**
 - `MusicEstimator` — main struct; configure antenna positions, angle search range/step, sample rate, and number of sources
+- `MusicEstimator::estimate_doa_from_real()` — real-data entry point (analytic signal per channel, then `estimate_doa`), like pyMUSIC's `getSourceAngles`
+- `MusicEstimator::ifb_music_spectrum()` — wideband variant; bin frequencies use the estimator's `sample_rate`, so tones above Nyquist cannot be recovered
 - `analytic_signal()` — converts real signal to complex via Hilbert transform (FFT-based)
 - `stft()` — Short-Time Fourier Transform with configurable window and overlap
 
@@ -72,4 +82,5 @@ Test data covers:
 
 - Rust edition 2024, MSRV follows current stable toolchain
 - No `rustfmt.toml` or `clippy.toml` — use `cargo fmt` and `cargo clippy` defaults
-- There is a typo in the existing readme filename (`REAME.md`); do not rename it without checking history
+- Golden files: `*.eigh.csv` (pyMUSIC with `np.linalg.eigh`) must match value-by-value; `*.eig.csv` (pyMUSIC as published) only by peak location, because `np.linalg.eig` returns a non-orthogonal noise basis on this near-noiseless data. Regenerate with the command in `tests/golden/generate_golden.py`.
+- Sign convention: musicrs uses a non-conjugated analytic signal with an `exp(+j2πfτ)` steering vector; pyMUSIC conjugates the analytic signal and uses `exp(−j2πfτ)`. Equivalent below Nyquist. The above-Nyquist sign flip and the real steering vector at Nyquist are musicrs additions tuned to the test data.
