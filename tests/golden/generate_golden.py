@@ -79,6 +79,14 @@ CASES = [
     ("single-source_300Hz_80deg_1.0s.wav", 300),
     ("single-source_1400Hz_40deg_1.0s.wav", 1400),
     ("single-source_4700Hz_120deg_1.0s.wav", 4700),
+    ("single-source_2500Hz_0deg_2.0s.wav", 2500),
+    ("single-source_5800Hz_160deg_2.0s.wav", 5800),
+    ("single-source_6900Hz_120deg_1.0s.wav", 6900),
+]
+
+# Multi-bin IFB on the sum of several recordings at the same DOA (one bin per tone)
+COMPOSITE_CASES = [
+    ("composite_300+1400+2500Hz_40deg_2.0s", [300, 1400, 2500], 40, "2.0s"),
 ]
 
 def run_case(fname, freq, solver):
@@ -100,10 +108,22 @@ def run_case(fname, freq, solver):
     print("wrote", stem, solver)
 
 
+def run_composite(name, freqs, doa, duration, solver):
+    parts = [read_wav_4ch(os.path.join(DATA_DIR, f"single-source_{f}Hz_{doa}deg_{duration}.wav")) for f in freqs]
+    n = min(p.shape[1] for p in parts)
+    data = sum(p[:, :n] for p in parts)
+    bins = [f * NFFT // SAMPLE_RATE for f in freqs]
+    est = pyMUSIC.MUSICEst()
+    spectrum, angles = pyMUSIC.IFBMUSICSpectrum(data, est.antennaPositions, NFFT, bins=bins)
+    write_csv(f"{name}.ifb_nfft{NFFT}_bins{'-'.join(map(str, bins))}.{solver}.csv", spectrum, angles)
+    print("wrote", name, solver)
+
+
 original_eig = np.linalg.eig
-for fname, freq in CASES:
-    np.linalg.eig = original_eig
-    run_case(fname, freq, "eig")
-    np.linalg.eig = np.linalg.eigh
-    run_case(fname, freq, "eigh")
+for solver, eig in [("eig", original_eig), ("eigh", np.linalg.eigh)]:
+    np.linalg.eig = eig
+    for fname, freq in CASES:
+        run_case(fname, freq, solver)
+    for name, freqs, doa, duration in COMPOSITE_CASES:
+        run_composite(name, freqs, doa, duration, solver)
 np.linalg.eig = original_eig
