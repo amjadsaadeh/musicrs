@@ -1,0 +1,1 @@
+add a project scope claude hook which runs tests when a task is affexting the code is finished. add some mechanism to skip tests, which may need too long to run
