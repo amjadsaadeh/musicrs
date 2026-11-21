@@ -14,21 +14,25 @@
 //! ## Quick Start
 //!
 //! ```rust
-//! use musicrs::{MusicEstimator, analytic_signal};
+//! use musicrs::MusicEstimator;
 //! use nalgebra::DMatrix;
-//! use num_complex::Complex;
 //!
-//! // Build estimator with the default Kinect 4-mic array geometry
+//! // Default Kinect 4-mic linear array, 720 angle steps over [0, 2π), 16 kHz
 //! let estimator = MusicEstimator::default();
 //!
-//! // Suppose `real_data` is a 4×N real-valued DMatrix<f64> read from a WAV file.
-//! // Convert each row to an analytic (complex) signal:
-//! // let complex_data = ...;
+//! // `real_data` is 4 × N real-valued microphone data (e.g. read from a WAV file).
+//! // Here: silence plus a tiny 300 Hz tone, just to show the call.
+//! let real_data = DMatrix::from_fn(4, 1600, |_, t| {
+//!     (2.0 * std::f64::consts::PI * 300.0 * t as f64 / 16000.0).cos()
+//! });
 //!
-//! // Estimate DOA for a 300 Hz narrowband source:
-//! // let angles = estimator.estimate_doa(&complex_data, 1, 300.0);
-//! // println!("DOA estimate: {}°", angles[0].to_degrees());
+//! // Analytic signal per channel, covariance, noise subspace, pseudo-spectrum, peaks:
+//! let angles = estimator.estimate_doa_from_real(&real_data, 1, 300.0);
+//! println!("DOA estimate: {:.1}°", angles[0].to_degrees());
 //! ```
+//!
+//! Use [`MusicEstimator::estimate_doa`] directly if you already have complex data, and
+//! [`MusicEstimator::ifb_music_spectrum`] for the wideband (IFB) variant.
 
 pub mod music;
 pub mod stft;
