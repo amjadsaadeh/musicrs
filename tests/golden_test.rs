@@ -7,6 +7,14 @@
 //   * `*.eig.csv`  – pyMUSIC as published. On this nearly noiseless data `eig`
 //     returns a non-orthogonal noise basis, so the values are basis-dependent; only
 //     the peak location is compared.
+//
+// At and above Nyquist (8000 Hz and 9100 Hz here) musicrs deliberately differs from
+// pyMUSIC (real steering vector at f == sr/2, conjugated one above it; see CLAUDE.md
+// "Sign convention"), so there is no pyMUSIC reference. Instead
+// `*.narrowband.musicrs.csv` are snapshots of musicrs's OWN output, not pyMUSIC
+// references: they pin that behaviour so it cannot change silently. Regenerate them
+// (after an intended change only) with
+//     MUSICRS_UPDATE_SNAPSHOTS=1 cargo test --test golden_test
 
 mod common;
 
@@ -108,19 +116,25 @@ fn check(prefix: &str, angles: &[f64], spectrum: &[f64]) {
     );
 }
 
+/// Narrowband spectrum of recording `stem` at `freq`, computed the way pyMUSIC's
+/// `getSourceAngles` does (analytic signal, covariance, one source). Returns
+/// `(spectrum, angles)`.
+fn narrowband_spectrum(est: &MusicEstimator, stem: &str, freq: f64) -> (Vec<f64>, Vec<f64>) {
+    let (_, data) = common::read_wav_4ch(&Path::new(common::DATA_DIR).join(format!("{stem}.wav")));
+    let analytic: Vec<Vec<_>> = (0..data.nrows())
+        .map(|m| analytic_signal(&data.row(m).iter().copied().collect::<Vec<_>>()))
+        .collect();
+    let x = DMatrix::from_fn(data.nrows(), data.ncols(), |m, t| analytic[m][t]);
+    let cov = (&x * x.adjoint()).scale(1.0 / data.ncols() as f64);
+    let noise = est.noise_subspace(&cov, 1);
+    est.spectrum(&noise, freq)
+}
+
 #[test]
 fn narrowband_spectrum_matches_pymusic() {
     let est = MusicEstimator::default();
     for (stem, freq) in CASES {
-        let (_, data) =
-            common::read_wav_4ch(&Path::new(common::DATA_DIR).join(format!("{stem}.wav")));
-        let analytic: Vec<Vec<_>> = (0..data.nrows())
-            .map(|m| analytic_signal(&data.row(m).iter().copied().collect::<Vec<_>>()))
-            .collect();
-        let x = DMatrix::from_fn(data.nrows(), data.ncols(), |m, t| analytic[m][t]);
-        let cov = (&x * x.adjoint()).scale(1.0 / data.ncols() as f64);
-        let noise = est.noise_subspace(&cov, 1);
-        let (spectrum, angles) = est.spectrum(&noise, freq);
+        let (spectrum, angles) = narrowband_spectrum(&est, stem, freq);
         check(&format!("{stem}.narrowband"), &angles, &spectrum);
     }
 }
@@ -169,6 +183,51 @@ fn ifb_multi_bin_spectrum_matches_pymusic() {
             ),
             &angles,
             &spectrum,
+        );
+    }
+}
+
+// ── musicrs snapshots at / above Nyquist (not pyMUSIC references) ────────────────
+
+/// Recordings at exactly Nyquist (real steering vector) and above it (conjugated).
+const SNAPSHOT_CASES: [(&str, f64); 4] = [
+    ("single-source_8000Hz_40deg_1.0s", 8000.0),
+    ("single-source_8000Hz_120deg_2.0s", 8000.0),
+    ("single-source_9100Hz_80deg_1.0s", 9100.0),
+    ("single-source_9100Hz_160deg_2.0s", 9100.0),
+];
+/// Snapshots compare musicrs with itself, so only floating-point noise across
+/// platforms/toolchains should remain.
+const SNAPSHOT_REL_TOLERANCE: f64 = 1e-9;
+
+#[test]
+fn narrowband_spectrum_matches_musicrs_snapshot_at_and_above_nyquist() {
+    let update = std::env::var("MUSICRS_UPDATE_SNAPSHOTS").is_ok_and(|v| v == "1");
+    let est = MusicEstimator::default();
+    for (stem, freq) in SNAPSHOT_CASES {
+        let (spectrum, angles) = narrowband_spectrum(&est, stem, freq);
+        let name = format!("{stem}.narrowband.musicrs.csv");
+        if update {
+            let mut csv = String::from("angle_rad,spectrum\n");
+            for (a, s) in angles.iter().zip(&spectrum) {
+                csv.push_str(&format!("{a:?},{s:?}\n"));
+            }
+            fs::write(Path::new(GOLDEN_DIR).join(&name), csv).unwrap();
+            println!("{name}: snapshot rewritten");
+            continue;
+        }
+        let (s_angles, s_spectrum) = read_golden(&name);
+        assert_eq!(angles, s_angles, "{name}: angle grid differs");
+        let err = spectrum
+            .iter()
+            .zip(&s_spectrum)
+            .map(|(s, g)| (s - g).abs() / g.abs())
+            .fold(0.0, f64::max);
+        println!("{name}: max relative error vs snapshot {err:.3e}");
+        assert!(
+            err < SNAPSHOT_REL_TOLERANCE,
+            "{name}: musicrs output changed by {err:.3e} relative to its snapshot; if \
+             intended, regenerate with MUSICRS_UPDATE_SNAPSHOTS=1 cargo test --test golden_test"
         );
     }
 }

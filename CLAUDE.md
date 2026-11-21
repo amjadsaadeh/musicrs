@@ -34,11 +34,11 @@ tests/
 ├── common/mod.rs                # Shared WAV/filename/angle helpers, ErrorLog
 ├── integration_test.rs          # Narrowband DOA on every WAV recording (±0.5°)
 ├── ifb_test.rs                  # IFB-MUSIC on the tone's bin (nfft 160), below Nyquist (±0.5°)
-├── golden_test.rs               # Spectra vs. original pyMUSIC output in tests/golden/
+├── golden_test.rs               # Spectra vs. pyMUSIC output; musicrs snapshots at/above Nyquist
 ├── broadband_test.rs            # IFB-MUSIC on composite multi-tone signals
 ├── noisy_data_test.rs           # Narrowband DOA with added white noise
 ├── synthetic_test.rs            # Synthetic plane waves: 2-D arrays, 2–3 sources, no mirror ambiguity
-├── golden/                      # pyMUSIC reference CSVs + generate_golden.py
+├── golden/                      # pyMUSIC reference CSVs, *.musicrs.csv snapshots, generate_golden.py
 └── data/single-source/*.wav     # 4-channel 24-bit 16kHz test recordings
 ```
 
@@ -93,4 +93,5 @@ Test data covers:
 - Rust edition 2024, MSRV follows current stable toolchain
 - No `rustfmt.toml` or `clippy.toml` — use `cargo fmt` and `cargo clippy` defaults
 - Golden files: `*.eigh.csv` (pyMUSIC with `np.linalg.eigh`) must match value-by-value; `*.eig.csv` (pyMUSIC as published) only by peak location, because `np.linalg.eig` returns a non-orthogonal noise basis on this near-noiseless data. Regenerate with the command in `tests/golden/generate_golden.py`.
+- Snapshot files: `*.narrowband.musicrs.csv` in `tests/golden/` are musicrs's own narrowband spectra at and above Nyquist (8000 Hz, 9100 Hz), not pyMUSIC references (musicrs deliberately differs from pyMUSIC there). They pin the at/above-Nyquist steering-vector behaviour to a relative tolerance of 1e-9. After an intended change, regenerate with `MUSICRS_UPDATE_SNAPSHOTS=1 cargo test --test golden_test` and review the diff.
 - Sign convention: musicrs uses a non-conjugated analytic signal with an `exp(+j2πfτ)` steering vector; pyMUSIC conjugates the analytic signal and uses `exp(−j2πfτ)`. Equivalent below Nyquist. The above-Nyquist sign flip and the real steering vector at Nyquist are musicrs additions tuned to the test data.
