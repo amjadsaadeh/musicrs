@@ -13,7 +13,7 @@
 
 mod common;
 
-use musicrs::MusicEstimator;
+use musicrs::{MusicEstimator, select_bins_by_energy};
 use nalgebra::DMatrix;
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -473,4 +473,38 @@ fn ifb_music_spectrum_values_finite_positive() {
         assert!(v.is_finite(), "spectrum[{i}] = {v} is not finite");
         assert!(v > 0.0, "spectrum[{i}] = {v} is not positive");
     }
+}
+
+/// Tolerance for energy-selected bins on composites (degrees). At nfft = 1024 the tones fall
+/// between bins, and the leakage bins are steered at their own frequency; worst measured
+/// error is 2.0° (3600 + 4700 + 5800 Hz at 0°).
+const TOL_ENERGY: f64 = 2.5;
+
+/// Three-tone composites with bins picked by energy (within 20 dB of the strongest), no
+/// knowledge of the tone frequencies needed. Covers low, mid and mixed tone sets at every
+/// angle, with on-bin (nfft 160) and off-bin (nfft 1024) tones.
+#[test]
+fn ifb_music_broadband_energy_selected_bins() {
+    let estimator = MusicEstimator::default();
+    let mut log = common::ErrorLog::new("IFB composites, energy-selected bins");
+
+    for freqs in [[300, 1400, 2500], [3600, 4700, 5800], [1400, 4700, 6900]] {
+        for doa_deg in ALL_ANGLES_DEG {
+            let data = load_composite_source(doa_deg, &freqs, "2.0s");
+            for nfft in [160, NFFT] {
+                let bins = select_bins_by_energy(&data, nfft, 20.0);
+                let (spectrum, angles) = estimator.ifb_music_spectrum(&data, nfft, 1, Some(&bins));
+                let estimated_deg = find_peak_doa_deg(&spectrum, &angles);
+                log.record(
+                    format!(
+                        "{freqs:?} Hz at {doa_deg}°, nfft {nfft}, {} bins",
+                        bins.len()
+                    ),
+                    min_equivalent_error_deg(estimated_deg, doa_deg as f64),
+                );
+            }
+        }
+    }
+
+    log.check(TOL_ENERGY);
 }

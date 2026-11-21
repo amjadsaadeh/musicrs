@@ -37,5 +37,5 @@
 pub mod music;
 pub mod stft;
 
-pub use music::MusicEstimator;
+pub use music::{MusicEstimator, select_bins_by_energy};
 pub use stft::{analytic_signal, stft};
