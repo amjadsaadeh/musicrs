@@ -37,6 +37,7 @@ tests/
 ├── golden_test.rs               # Spectra vs. original pyMUSIC output in tests/golden/
 ├── broadband_test.rs            # IFB-MUSIC on composite multi-tone signals
 ├── noisy_data_test.rs           # Narrowband DOA with added white noise
+├── synthetic_test.rs            # Synthetic plane waves: 2-D arrays, 2–3 sources, no mirror ambiguity
 ├── golden/                      # pyMUSIC reference CSVs + generate_golden.py
 └── data/single-source/*.wav     # 4-channel 24-bit 16kHz test recordings
 ```
