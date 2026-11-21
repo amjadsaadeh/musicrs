@@ -82,6 +82,8 @@ Test data covers:
 
 ## Workflow
 
+- Before implementing a non-trivial change, propose a plan and get it approved first. While planning, ask clarifying questions about anything ambiguous (scope, API shape, defaults, test data) rather than guessing.
+
 - Make changes on a branch, never directly on `main`:
   - `feat/<feature-name>` for new features
   - `fix/<bugfix-name>` for bug fixes

@@ -1,1 +1,4 @@
 /target
+
+# Git worktrees created by Claude Code subagents
+/.claude/worktrees/
