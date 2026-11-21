@@ -1,0 +1,1 @@
+this repo is a reimplementaion of my master thesis. original code is https://github.com/amjadsaadeh/pyMUSIC. analyze where the gaps are
