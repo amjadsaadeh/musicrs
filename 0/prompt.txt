@@ -1,0 +1,1 @@
+well doesn't provide rust some mechnism to tag tests? so you can use a flag to exclude "slow" tagged tests
