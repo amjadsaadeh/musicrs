@@ -1,0 +1,1 @@
+yes, add energy-based bin selection on a new branch. in another worktree and subagent work on the golden cases. also add to claude.md that you should propose a plan before and ask clarifing question during planning
