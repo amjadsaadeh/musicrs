@@ -57,9 +57,9 @@ fn hermitian_eigen(mat: &CMatrix) -> (Vec<f64>, CMatrix) {
     order.sort_unstable_by(|&a, &b| s_col.read(a).re.partial_cmp(&s_col.read(b).re).unwrap());
 
     let eigenvalues: Vec<f64> = order.iter().map(|&i| s_col.read(i).re).collect();
-    // faer's selfadjoint_eigendecomposition returns eigenvectors with conjugated
-    // imaginary parts relative to the signal-processing convention.  Negate im to
-    // recover the eigenvectors in the standard A·v = λ·v convention expected by MUSIC.
+    // Copy the eigenvectors (reordered by ascending eigenvalue) back into nalgebra.
+    // faer's eigenvectors already satisfy A·v = λ·v, so no conjugation is applied;
+    // the steering-vector sign convention in `steering_vector` is matched to this.
     let eigenvectors: CMatrix = CMatrix::from_fn(n, n, |row, col| {
         let src_col = order[col];
         let c = u_mat.read(row, src_col);
