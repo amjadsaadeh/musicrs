@@ -399,7 +399,9 @@ impl MusicEstimator {
         let default_bins: Vec<usize> = (1..freq_bins).collect();
         let active_bins: &[usize] = bins.unwrap_or(&default_bins);
 
-        let mut product_spectrum: Option<Vec<f64>> = None;
+        // Geometric mean, accumulated as a sum of logarithms: the product of hundreds of
+        // per-bin spectra overflows f64.
+        let mut log_sum: Option<Vec<f64>> = None;
         let mut angles_out: Vec<f64> = Vec::new();
         let mut n_processed = 0usize;
 
@@ -424,25 +426,27 @@ impl MusicEstimator {
             let noise_mat = self.noise_subspace(&cov, n_sources);
             let (spec, angles) = self.spectrum(&noise_mat, frequency);
 
-            match &mut product_spectrum {
+            match &mut log_sum {
                 None => {
-                    product_spectrum = Some(spec);
+                    log_sum = Some(spec.iter().map(|s| s.ln()).collect());
                     angles_out = angles;
                 }
-                Some(prod) => {
-                    for (p, s) in prod.iter_mut().zip(spec.iter()) {
-                        *p *= s;
+                Some(sum) => {
+                    for (acc, s) in sum.iter_mut().zip(spec.iter()) {
+                        *acc += s.ln();
                     }
                 }
             }
             n_processed += 1;
         }
 
-        match product_spectrum {
+        match log_sum {
             None => make_flat_spectrum(),
-            Some(prod) => {
-                let exp = 1.0 / n_processed as f64;
-                let merged: Vec<f64> = prod.iter().map(|&v| v.powf(exp)).collect();
+            Some(sum) => {
+                let merged: Vec<f64> = sum
+                    .iter()
+                    .map(|&v| (v / n_processed as f64).exp())
+                    .collect();
                 (merged, angles_out)
             }
         }

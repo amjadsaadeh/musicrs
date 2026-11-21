@@ -6,7 +6,10 @@
 
 mod common;
 
+use std::path::Path;
+
 use musicrs::MusicEstimator;
+use nalgebra::DMatrix;
 
 const NFFT: usize = 160;
 
@@ -52,4 +55,57 @@ fn ifb_single_bin_doa() {
         failures.join("\n")
     );
     println!("All {total} IFB single-bin DOA tests passed (tolerance ±{tolerance_deg:.0}°).");
+}
+
+fn load(stem: &str) -> DMatrix<f64> {
+    common::read_wav_4ch(&Path::new(common::DATA_DIR).join(format!("{stem}.wav"))).1
+}
+
+fn assert_same_spectrum(a: &[f64], b: &[f64]) {
+    assert_eq!(a.len(), b.len());
+    for (x, y) in a.iter().zip(b) {
+        assert!((x - y).abs() <= 1e-9 * y.abs(), "{x} vs {y}");
+    }
+}
+
+/// Combining all 512 bins must not overflow: the spectrum is a geometric mean, so it stays
+/// within the range of the per-bin spectra. Before taking the mean as a sum of logs, the raw
+/// product overflowed to `inf` on this recording.
+#[test]
+fn ifb_all_bins_spectrum_is_finite() {
+    let est = MusicEstimator::default();
+    let (spectrum, _) =
+        est.ifb_music_spectrum(&load("single-source_300Hz_80deg_1.0s"), 1024, 1, None);
+    for (i, &v) in spectrum.iter().enumerate() {
+        assert!(v.is_finite() && v > 0.0, "spectrum[{i}] = {v}");
+    }
+}
+
+/// The geometric mean of a bin with itself is that bin's spectrum.
+#[test]
+fn ifb_repeated_bin_equals_single_bin() {
+    let est = MusicEstimator::default();
+    let data = load("single-source_1400Hz_40deg_1.0s");
+    let (once, _) = est.ifb_music_spectrum(&data, NFFT, 1, Some(&[14]));
+    let (thrice, _) = est.ifb_music_spectrum(&data, NFFT, 1, Some(&[14, 14, 14]));
+    assert_same_spectrum(&thrice, &once);
+}
+
+/// Bins at or above `nfft / 2 + 1` are skipped.
+#[test]
+fn ifb_ignores_out_of_range_bins() {
+    let est = MusicEstimator::default();
+    let data = load("single-source_1400Hz_40deg_1.0s");
+    let (only, _) = est.ifb_music_spectrum(&data, NFFT, 1, Some(&[14]));
+    let (with_extra, _) = est.ifb_music_spectrum(&data, NFFT, 1, Some(&[14, NFFT / 2 + 1, 10_000]));
+    assert_same_spectrum(&with_extra, &only);
+}
+
+/// Data shorter than one STFT window gives a flat spectrum over the search grid.
+#[test]
+fn ifb_data_shorter_than_window_is_flat() {
+    let est = MusicEstimator::default();
+    let (spectrum, angles) = est.ifb_music_spectrum(&DMatrix::zeros(4, NFFT - 1), NFFT, 1, None);
+    assert_eq!(angles.len(), est.angle_steps_num);
+    assert!(spectrum.iter().all(|&v| v == 1.0));
 }
