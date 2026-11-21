@@ -31,9 +31,9 @@ src/
 ├── music.rs    # Core MUSIC algorithm (MusicEstimator, spectrum, DOA estimation)
 └── stft.rs     # Signal processing (STFT, analytic signal via Hilbert transform)
 tests/
-├── common/mod.rs                # Shared WAV/filename/angle helpers
-├── integration_test.rs          # Narrowband DOA on every WAV recording (±5°)
-├── ifb_test.rs                  # IFB-MUSIC on the tone's bin (nfft 160), below Nyquist (±5°)
+├── common/mod.rs                # Shared WAV/filename/angle helpers, ErrorLog
+├── integration_test.rs          # Narrowband DOA on every WAV recording (±0.5°)
+├── ifb_test.rs                  # IFB-MUSIC on the tone's bin (nfft 160), below Nyquist (±0.5°)
 ├── golden_test.rs               # Spectra vs. original pyMUSIC output in tests/golden/
 ├── broadband_test.rs            # IFB-MUSIC on composite multi-tone signals
 ├── noisy_data_test.rs           # Narrowband DOA with added white noise
@@ -68,7 +68,7 @@ tests/
 
 ## Testing
 
-Integration tests load WAV files from `tests/data/single-source/` and verify DOA estimates within **±5°** of the known ground truth. File naming convention:
+Integration tests load WAV files from `tests/data/single-source/` and compare DOA estimates with the ground truth in the file name. Clean recordings land exactly on the true angle, so their tolerance is one 0.5° grid step; noisy and broadband-triple tests use tolerances set a little above the measured worst error. `common::ErrorLog` prints the worst error per test (`cargo test -- --nocapture`), which is the number to re-check before changing a tolerance. File naming convention:
 
 ```
 single-source_<freq>Hz_<doa>deg_<duration>s.wav

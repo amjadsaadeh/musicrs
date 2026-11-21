@@ -5,10 +5,9 @@
 // (10 dB, 5 dB, 1 dB) and the DOA estimate is checked against the known
 // ground-truth angle encoded in the filename.
 
-use std::fs;
-use std::path::{Path, PathBuf};
+mod common;
 
-use musicrs::{MusicEstimator, analytic_signal};
+use musicrs::MusicEstimator;
 use nalgebra::DMatrix;
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -82,157 +81,30 @@ fn add_white_noise(signal: &DMatrix<f64>, snr_db: f64, seed: u64) -> DMatrix<f64
     noisy
 }
 
-/// Read a 4-channel, 24-bit PCM WAV file with `hound` and return
-/// `(sample_rate, data)` where `data` is a `(4 × n_samples)` real matrix
-/// normalised to `[-1, 1]`.
-fn read_wav_4ch(path: &PathBuf) -> (u32, DMatrix<f64>) {
-    let mut reader = hound::WavReader::open(path).expect("Failed to open WAV file");
-    let spec = reader.spec();
-    assert_eq!(spec.channels, 4, "Expected 4-channel WAV");
-    assert_eq!(spec.bits_per_sample, 24, "Expected 24-bit PCM");
-
-    let raw_samples: Vec<i32> = reader
-        .samples::<i32>()
-        .map(|s| s.expect("Sample read error"))
-        .collect();
-
-    let n_channels = spec.channels as usize;
-    let n_samples = raw_samples.len() / n_channels;
-    let scale = 2.0_f64.powi(23);
-
-    let mut data = DMatrix::<f64>::zeros(n_channels, n_samples);
-    for (idx, &sample) in raw_samples.iter().enumerate() {
-        let ch = idx % n_channels;
-        let t = idx / n_channels;
-        data[(ch, t)] = sample as f64 / scale;
-    }
-
-    (spec.sample_rate, data)
-}
-
-/// Parse metadata from a test-data filename.
-/// Format: `single-source_<freq>Hz_<doa>deg_<duration>s.wav`
-fn parse_test_file_meta_params(path: &Path) -> Option<Vec<String>> {
-    path.file_name()
-        .and_then(|name| name.to_str())
-        .map(|file_name| {
-            file_name
-                .strip_suffix(".wav")
-                .unwrap()
-                .split('_')
-                .map(str::to_owned)
-                .collect()
-        })
-}
-
-/// Core helper shared by all SNR-level tests.
-///
-/// Loads every WAV from `tests/data/single-source/`, corrupts it with AWGN at
-/// `snr_db`, runs the MUSIC estimator, and asserts that the error is within
-/// `tolerance_deg` for each file.
+/// Loads every WAV recording, corrupts it with AWGN at `snr_db`, runs narrowband MUSIC and
+/// checks every estimate against `tolerance_deg`.
 fn run_noisy_doa_test(snr_db: f64, tolerance_deg: f64) {
     let estimator = MusicEstimator::default();
+    let mut log = common::ErrorLog::new(format!("narrowband WAV @ {snr_db} dB SNR"));
 
-    let paths = fs::read_dir("./tests/data/single-source")
-        .expect("Test data directory not found")
-        .filter(|p| {
-            let p = p.as_ref().unwrap().path();
-            p.extension().and_then(|ext| ext.to_str()) == Some("wav")
-        });
-
-    let mut total = 0usize;
-    let mut failures: Vec<String> = Vec::new();
-
-    for (file_idx, entry) in paths.enumerate() {
-        let path = entry.unwrap().path();
-        let parts = parse_test_file_meta_params(&path).unwrap();
-
-        let freq_hz: f64 = parts[1].strip_suffix("Hz").unwrap().parse().unwrap();
-        let true_doa_deg: f64 = parts[2].strip_suffix("deg").unwrap().parse().unwrap();
-
-        // ── Read WAV, add noise, build complex signal matrix ──────────────────
-        let (sample_rate, real_data) = read_wav_4ch(&path);
-        // Use file index as part of the seed so each file gets different noise
-        // while remaining reproducible across test runs.
+    for (file_idx, path) in common::wav_files().iter().enumerate() {
+        let meta = common::parse_meta(path);
+        let (_, real_data) = common::read_wav_4ch(path);
+        // Seed from the SNR and the file's position in the (sorted) file list, so each
+        // file gets different but reproducible noise.
         let seed = (snr_db as u64).wrapping_mul(1_000) ^ (file_idx as u64).wrapping_mul(7_919);
-        let noisy_data = add_white_noise(&real_data, snr_db, seed);
+        let noisy = add_white_noise(&real_data, snr_db, seed);
 
-        let n_mics = noisy_data.nrows();
-        let n_samples = noisy_data.ncols();
-
-        let mut complex_data = DMatrix::<num_complex::Complex<f64>>::zeros(n_mics, n_samples);
-        for m in 0..n_mics {
-            let row: Vec<f64> = noisy_data.row(m).iter().copied().collect();
-            let analytic = analytic_signal(&row);
-            for (t, c) in analytic.into_iter().enumerate() {
-                complex_data[(m, t)] = c;
-            }
-        }
-
-        // ── Estimate DOA ──────────────────────────────────────────────────────
-        let estimated_angles = estimator.estimate_doa(&complex_data, 1, freq_hz);
-
-        let estimated_deg = if estimated_angles.is_empty() {
-            failures.push(format!(
-                "{:?}: no peak found (expected {:.1}°, SNR {snr_db:.0} dB)",
-                path.file_name().unwrap(),
-                true_doa_deg
-            ));
-            total += 1;
-            continue;
-        } else {
-            estimated_angles[0].to_degrees()
-        };
-
-        // ── Check accuracy ────────────────────────────────────────────────────
-        let nyquist = sample_rate as f64 / 2.0;
-        let is_nyquist = (freq_hz - nyquist).abs() < 0.5;
-        let angular_dist = |a: f64, b: f64| -> f64 {
-            let d = (a - b).abs();
-            if d > 180.0 { 360.0 - d } else { d }
-        };
-        let equivalent_angles: &[f64] = if is_nyquist {
-            &[
-                true_doa_deg,
-                360.0 - true_doa_deg,
-                180.0 - true_doa_deg,
-                180.0 + true_doa_deg,
-            ]
-        } else {
-            &[true_doa_deg, 360.0 - true_doa_deg]
-        };
-        let diff_wrapped = equivalent_angles
-            .iter()
-            .map(|&t| angular_dist(estimated_deg, t))
-            .fold(f64::INFINITY, f64::min);
-
-        if diff_wrapped > tolerance_deg {
-            failures.push(format!(
-                "{} @ SNR {snr_db:.0} dB: expected {:.1}° (equivalents: {:?}), \
-                 got {:.1}° (error {:.1}°)",
-                path.file_name().unwrap().to_str().unwrap(),
-                true_doa_deg,
-                equivalent_angles,
-                estimated_deg,
-                diff_wrapped,
-            ));
-        }
-        total += 1;
+        let estimate = estimator.estimate_doa_from_real(&noisy, 1, meta.frequency_hz);
+        let truths =
+            common::equivalent_angles(meta.doa_deg, meta.frequency_hz, estimator.sample_rate);
+        let error = estimate.first().map_or(f64::INFINITY, |a| {
+            common::angular_error(a.to_degrees(), &truths)
+        });
+        log.record(path.file_name().unwrap().to_string_lossy(), error);
     }
 
-    if !failures.is_empty() {
-        panic!(
-            "{}/{} files failed noisy DOA test (SNR {snr_db:.0} dB, tolerance ±{tolerance_deg:.0}°):\n{}",
-            failures.len(),
-            total,
-            failures.join("\n")
-        );
-    }
-
-    println!(
-        "All {total} noisy DOA tests passed \
-         (SNR {snr_db:.0} dB, tolerance ±{tolerance_deg:.0}°)."
-    );
+    log.check(tolerance_deg);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -242,31 +114,31 @@ fn run_noisy_doa_test(snr_db: f64, tolerance_deg: f64) {
 /// DOA estimation under 10 dB SNR.
 ///
 /// At 10 dB the noise power is one-tenth of the signal power — a comfortable
-/// operating regime for MUSIC. Tolerances are widened slightly compared with
-/// the clean-signal baseline (±5°) to account for residual estimation error.
+/// operating regime for MUSIC. Worst measured error is 3.0° (300 Hz, 0°); the
+/// 10 dB and 5 dB tolerances leave headroom for a different noise draw.
 #[test]
 #[ignore = "slow"]
 fn test_single_source_doa_noisy_10db() {
-    run_noisy_doa_test(10.0, 10.0);
+    run_noisy_doa_test(10.0, 5.0);
 }
 
 /// DOA estimation under 5 dB SNR.
 ///
 /// At 5 dB signal and noise are of comparable magnitude. MUSIC degrades
-/// gracefully but some additional angular error is expected.
+/// gracefully. Worst measured error is 1.5°.
 #[test]
 #[ignore = "slow"]
 fn test_single_source_doa_noisy_5db() {
-    run_noisy_doa_test(5.0, 15.0);
+    run_noisy_doa_test(5.0, 5.0);
 }
 
 /// DOA estimation under 1 dB SNR.
 ///
 /// At 1 dB the noise is almost as strong as the signal. This tests the
 /// lower bound of practical MUSIC performance with the available recording
-/// length and array geometry.
+/// length and array geometry. Worst measured error is 5.0° (300 Hz, 0°).
 #[test]
 #[ignore = "slow"]
 fn test_single_source_doa_noisy_1db() {
-    run_noisy_doa_test(1.0, 20.0);
+    run_noisy_doa_test(1.0, 8.0);
 }

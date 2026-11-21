@@ -13,14 +13,15 @@ use nalgebra::DMatrix;
 
 const NFFT: usize = 160;
 
+/// Every recording's estimate lands on its true angle (worst error 0.00° on the 0.5°
+/// grid); allow one grid step.
+const TOLERANCE_DEG: f64 = 0.5;
+
 #[test]
 fn ifb_single_bin_doa() {
     let est = MusicEstimator::default();
-    let tolerance_deg = 5.0_f64;
     let nyquist = est.sample_rate / 2.0;
-
-    let mut total = 0usize;
-    let mut failures = Vec::new();
+    let mut log = common::ErrorLog::new("IFB single bin");
 
     for path in common::wav_files() {
         let meta = common::parse_meta(&path);
@@ -35,26 +36,14 @@ fn ifb_single_bin_doa() {
         let argmax = (0..spectrum.len())
             .max_by(|&a, &b| spectrum[a].total_cmp(&spectrum[b]))
             .unwrap();
-        let estimated_deg = angles[argmax].to_degrees();
-        let error = common::angular_error(estimated_deg, &[meta.doa_deg, 360.0 - meta.doa_deg]);
-        total += 1;
-        if error > tolerance_deg {
-            failures.push(format!(
-                "{}: expected {:.1}°, got {estimated_deg:.1}° (error {error:.1}°)",
-                path.file_name().unwrap().to_string_lossy(),
-                meta.doa_deg
-            ));
-        }
+        let error = common::angular_error(
+            angles[argmax].to_degrees(),
+            &[meta.doa_deg, 360.0 - meta.doa_deg],
+        );
+        log.record(path.file_name().unwrap().to_string_lossy(), error);
     }
 
-    assert!(total > 0, "no test files below Nyquist");
-    assert!(
-        failures.is_empty(),
-        "{}/{total} files failed IFB DOA test (tolerance ±{tolerance_deg:.0}°):\n{}",
-        failures.len(),
-        failures.join("\n")
-    );
-    println!("All {total} IFB single-bin DOA tests passed (tolerance ±{tolerance_deg:.0}°).");
+    log.check(TOLERANCE_DEG);
 }
 
 fn load(stem: &str) -> DMatrix<f64> {
