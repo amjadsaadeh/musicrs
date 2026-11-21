@@ -12,6 +12,7 @@ use musicrs::MusicEstimator;
 /// single source and verify it is within ±5° of the ground-truth angle encoded
 /// in the filename.
 #[test]
+#[ignore = "slow"]
 fn test_single_source_doa() {
     let estimator = MusicEstimator::default();
     let tolerance_deg = 5.0_f64;

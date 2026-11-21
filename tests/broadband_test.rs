@@ -517,6 +517,7 @@ fn test_broadband_single_source_doa_nine_tone() {
 ///
 /// All failures are collected and reported together at the end.
 #[test]
+#[ignore = "slow"]
 fn test_broadband_single_source_doa_frequency_triples() {
     let estimator = MusicEstimator::default();
     let tolerance_deg = TOL_TARGETED;

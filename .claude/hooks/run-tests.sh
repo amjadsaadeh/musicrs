@@ -3,9 +3,8 @@
 # changed code (src/, tests/, Cargo.toml, Cargo.lock).
 #
 # Skipping:
-#   - Slow tests are listed (one exact test name per line) in
-#     .claude/hooks/slow-tests.txt and passed to the test harness as --skip.
-#     Run the full suite yourself with plain `cargo test`.
+#   - Slow tests carry #[ignore = "slow"]; plain `cargo test` (what this hook
+#     runs) skips them. Run them with `cargo test -- --include-ignored`.
 #   - MUSICRS_SKIP_HOOK_TESTS=1 in the environment Claude Code was started
 #     from disables the hook entirely.
 #
@@ -43,18 +42,8 @@ if [[ "$stop_hook_active" == "true" && -f "$stamp_dir/failed" \
   exit 0
 fi
 
-skip_args=()
-slow_list=.claude/hooks/slow-tests.txt
-if [[ -f "$slow_list" ]]; then
-  while IFS= read -r name; do
-    name=${name%%#*}; name=${name//[[:space:]]/}
-    [[ -n "$name" ]] && skip_args+=(--skip "$name")
-  done < "$slow_list"
-fi
-[[ ${#skip_args[@]} -gt 0 ]] && skip_args=(--exact "${skip_args[@]}")
-
 log="$stamp_dir/last-run.log"
-if cargo test --quiet -- "${skip_args[@]}" >"$log" 2>&1; then
+if cargo test --quiet >"$log" 2>&1; then
   echo "$fingerprint" > "$stamp_dir/passed"
   rm -f "$stamp_dir/failed"
   exit 0
@@ -62,7 +51,7 @@ fi
 
 echo "$fingerprint" > "$stamp_dir/failed"
 {
-  echo "Stop hook: \`cargo test\` failed (slow tests in $slow_list skipped). Fix the failures before finishing. Last 80 lines of $log:"
+  echo "Stop hook: \`cargo test\` failed (slow #[ignore] tests skipped). Fix the failures before finishing. Last 80 lines of $log:"
   tail -n 80 "$log"
 } >&2
 exit 2

@@ -1,8 +1,0 @@
-# Tests the Stop hook (.claude/hooks/run-tests.sh) skips because they take
-# more than ~10 s each in a debug build. One exact test name per line;
-# '#' starts a comment. `cargo test` and CI still run them.
-test_broadband_single_source_doa_frequency_triples   # broadband_test, ~11 s
-test_single_source_doa_noisy_10db                    # noisy_data_test, ~20 s
-test_single_source_doa_noisy_5db                     # noisy_data_test, ~20 s
-test_single_source_doa_noisy_1db                     # noisy_data_test, ~20 s
-test_single_source_doa                               # integration_test, ~18 s
