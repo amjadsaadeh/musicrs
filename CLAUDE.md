@@ -78,6 +78,13 @@ Test data covers:
 - Durations: 1 s and 2 s
 - Array: Kinect 4-mic geometry
 
+## Workflow
+
+- Make changes on a branch, never directly on `main`:
+  - `feat/<feature-name>` for new features
+  - `fix/<bugfix-name>` for bug fixes
+- Structure work in reasonably sized commits: each commit is one logical change that builds and passes tests on its own.
+
 ## Notes
 
 - Rust edition 2024, MSRV follows current stable toolchain
