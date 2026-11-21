@@ -421,7 +421,9 @@ impl MusicEstimator {
         let default_bins: Vec<usize> = (1..freq_bins).collect();
         let active_bins: &[usize] = bins.unwrap_or(&default_bins);
 
-        let mut product_spectrum: Option<Vec<f64>> = None;
+        // Geometric mean, accumulated as a sum of logarithms: the product of hundreds of
+        // per-bin spectra overflows f64.
+        let mut log_sum: Option<Vec<f64>> = None;
         let mut angles_out: Vec<f64> = Vec::new();
         let mut n_processed = 0usize;
 
@@ -446,25 +448,27 @@ impl MusicEstimator {
             let noise_mat = self.noise_subspace(&cov, n_sources);
             let (spec, angles) = self.spectrum(&noise_mat, frequency);
 
-            match &mut product_spectrum {
+            match &mut log_sum {
                 None => {
-                    product_spectrum = Some(spec);
+                    log_sum = Some(spec.iter().map(|s| s.ln()).collect());
                     angles_out = angles;
                 }
-                Some(prod) => {
-                    for (p, s) in prod.iter_mut().zip(spec.iter()) {
-                        *p *= s;
+                Some(sum) => {
+                    for (acc, s) in sum.iter_mut().zip(spec.iter()) {
+                        *acc += s.ln();
                     }
                 }
             }
             n_processed += 1;
         }
 
-        match product_spectrum {
+        match log_sum {
             None => make_flat_spectrum(),
-            Some(prod) => {
-                let exp = 1.0 / n_processed as f64;
-                let merged: Vec<f64> = prod.iter().map(|&v| v.powf(exp)).collect();
+            Some(sum) => {
+                let merged: Vec<f64> = sum
+                    .iter()
+                    .map(|&v| (v / n_processed as f64).exp())
+                    .collect();
                 (merged, angles_out)
             }
         }
@@ -494,9 +498,8 @@ mod tests {
         let est = default_est();
         let sv = est.steering_vector(PI / 4.0, 500.0); // unit-magnitude elements
         let cov = &sv * sv.adjoint(); // rank-1, ‖sv‖² = 4
-        let (mut ev, _) = hermitian_eigen(&cov);
-        ev.sort_by(|a, b| a.partial_cmp(b).unwrap());
-        // Three near-zero eigenvalues, one equal to ‖sv‖² ≈ 4
+        let (ev, _) = hermitian_eigen(&cov);
+        // Ascending order, as returned (not re-sorted here): three near-zero eigenvalues, one equal to ‖sv‖² ≈ 4
         assert_abs_diff_eq!(ev[0], 0.0, epsilon = 1e-8);
         assert_abs_diff_eq!(ev[1], 0.0, epsilon = 1e-8);
         assert_abs_diff_eq!(ev[2], 0.0, epsilon = 1e-8);
@@ -532,17 +535,16 @@ mod tests {
         );
     }
 
-    /// Eigenvalues of a diagonal real matrix should be the diagonal entries.
+    /// Eigenvalues of a diagonal real matrix are its diagonal entries, returned in
+    /// ascending order even when the diagonal is not.
     #[test]
     fn hermitian_eigen_diagonal_real() {
         let mat = CMatrix::from_diagonal(&DVec::from_vec(vec![
+            Cplx::new(3.0, 0.0),
             Cplx::new(1.0, 0.0),
             Cplx::new(2.0, 0.0),
-            Cplx::new(3.0, 0.0),
         ]));
-        let (eigenvalues, _) = hermitian_eigen(&mat);
-        let mut ev = eigenvalues.clone();
-        ev.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        let (ev, _) = hermitian_eigen(&mat);
         assert_abs_diff_eq!(ev[0], 1.0, epsilon = 1e-10);
         assert_abs_diff_eq!(ev[1], 2.0, epsilon = 1e-10);
         assert_abs_diff_eq!(ev[2], 3.0, epsilon = 1e-10);
@@ -567,6 +569,59 @@ mod tests {
         }
     }
 
+    /// A dense Hermitian 4×4 matrix with distinct eigenvalues.
+    fn dense_hermitian() -> CMatrix {
+        let est = default_est();
+        let a = est.steering_vector(0.4, 700.0);
+        let b = est.steering_vector(2.1, 700.0);
+        let diag = CMatrix::from_diagonal(&DVec::from_vec(
+            [0.1, 0.2, 0.3, 0.4].map(|d| Cplx::new(d, 0.0)).to_vec(),
+        ));
+        (&a * a.adjoint()).scale(3.0) + &b * b.adjoint() + diag
+    }
+
+    /// Eigenvalues come back ascending (`noise_subspace` relies on this) and every
+    /// column satisfies A·v = λ·v.
+    #[test]
+    fn hermitian_eigen_ascending_and_satisfies_definition() {
+        let mat = dense_hermitian();
+        let (vals, vecs) = hermitian_eigen(&mat);
+        assert!(
+            vals.windows(2).all(|w| w[0] <= w[1]),
+            "eigenvalues not ascending: {vals:?}"
+        );
+        for (k, &lambda) in vals.iter().enumerate() {
+            let v = vecs.column(k);
+            let residual = (&mat * v - v * Cplx::new(lambda, 0.0)).norm();
+            assert!(residual < 1e-10, "column {k}: ‖A·v − λ·v‖ = {residual:e}");
+        }
+    }
+
+    /// The noise subspace is spanned by the eigenvectors of the smallest eigenvalues, so it
+    /// is orthogonal to every source steering vector.
+    #[test]
+    fn noise_subspace_orthogonal_to_sources() {
+        let est = default_est();
+        let n = est.n_antennas();
+        let a = est.steering_vector(0.4, 700.0);
+        let b = est.steering_vector(2.1, 700.0);
+        let cov = (&a * a.adjoint()).scale(3.0) + &b * b.adjoint();
+        let noise = est.noise_subspace(&(cov + CMatrix::identity(n, n).scale(1e-3)), 2);
+        assert_eq!(noise.ncols(), n - 2);
+        for sv in [&a, &b] {
+            let leak = (noise.adjoint() * sv).norm();
+            assert!(leak < 1e-8, "‖Eₙᴴ·a‖ = {leak:e}");
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "n_sources must be less than the number of antennas")]
+    fn noise_subspace_rejects_too_many_sources() {
+        let est = default_est();
+        let n = est.n_antennas();
+        est.noise_subspace(&CMatrix::identity(n, n), n);
+    }
+
     // ── steering_vector ───────────────────────────────────────────────────────
 
     #[test]
@@ -584,6 +639,67 @@ mod tests {
                 assert_abs_diff_eq!(c.norm(), 1.0, epsilon = 1e-12);
             }
         }
+    }
+
+    /// `exp(+j·2π·f·τⱼ)` with `τⱼ = (pⱼ·d̂)/c`, written out independently of
+    /// `steering_vector`.
+    fn expected_steering(est: &MusicEstimator, angle: f64, frequency: f64) -> Vec<Cplx> {
+        est.antenna_positions
+            .iter()
+            .map(|p| {
+                let tau = (p[0] * angle.cos() + p[1] * angle.sin()) / SPEED_OF_SOUND;
+                Cplx::from_polar(1.0, 2.0 * PI * frequency * tau)
+            })
+            .collect()
+    }
+
+    fn assert_cplx_eq(got: Cplx, expected: Cplx) {
+        assert_abs_diff_eq!(got.re, expected.re, epsilon = 1e-12);
+        assert_abs_diff_eq!(got.im, expected.im, epsilon = 1e-12);
+    }
+
+    /// Below Nyquist, element j is `exp(+j·2π·f·τⱼ)` (musicrs's sign convention).
+    #[test]
+    fn steering_vector_phase_below_nyquist() {
+        let est = MusicEstimator {
+            antenna_positions: vec![[0.1, 0.0], [0.0, 0.07], [-0.05, -0.03]],
+            ..default_est()
+        };
+        for (angle, f) in [(0.7, 1200.0), (2.5, 300.0), (4.0, 7999.0)] {
+            let sv = est.steering_vector(angle, f);
+            for (&got, want) in sv.iter().zip(expected_steering(&est, angle, f)) {
+                assert_cplx_eq(got, want);
+            }
+        }
+    }
+
+    /// Above Nyquist the phase sign flips: the vector is the conjugate of the formula.
+    #[test]
+    fn steering_vector_conjugated_above_nyquist() {
+        let est = default_est();
+        let (angle, f) = (0.7, 9100.0);
+        let sv = est.steering_vector(angle, f);
+        for (&got, want) in sv.iter().zip(expected_steering(&est, angle, f)) {
+            assert_cplx_eq(got, want.conj());
+        }
+    }
+
+    /// Within 0.5 Hz of Nyquist the vector is real, `cos(2π·f·τⱼ)`; just outside it is not.
+    #[test]
+    fn steering_vector_real_at_nyquist() {
+        let est = default_est();
+        let angle = 0.7;
+        for f in [8000.0, 7999.6, 8000.4] {
+            let sv = est.steering_vector(angle, f);
+            for (&got, want) in sv.iter().zip(expected_steering(&est, angle, f)) {
+                assert_cplx_eq(got, Cplx::new(want.re, 0.0));
+            }
+        }
+        let above = est.steering_vector(angle, 8000.6);
+        assert!(
+            above.iter().any(|c| c.im.abs() > 1e-3),
+            "8000.6 Hz should be complex"
+        );
     }
 
     /// Single element at origin → zero delay → phase = 1+0j for all angles.

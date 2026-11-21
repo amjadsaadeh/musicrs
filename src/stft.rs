@@ -10,8 +10,9 @@ use rustfft::FftPlanner;
 ///
 /// # Algorithm
 /// 1. Forward FFT of the real input.
-/// 2. Apply the one-sided spectral window H: `H[0] = 1`, `H[1..N/2] = 2`, `H[N/2] = 1` (for
-///    even N), `H[N/2+1..] = 0`.
+/// 2. Apply the one-sided spectral window H: `H[0] = 1`, `H[k] = 2` for the positive
+///    frequencies `1 ≤ k < (N+1)/2`, `H[N/2] = 1` for the Nyquist bin of even N, and `H = 0` for
+///    the negative frequencies `k > N/2` (as in `scipy.signal.hilbert`).
 /// 3. Inverse FFT → analytic signal.
 ///
 /// # Examples
@@ -28,6 +29,9 @@ use rustfft::FftPlanner;
 /// ```
 pub fn analytic_signal(data: &[f64]) -> Vec<Complex<f64>> {
     let n = data.len();
+    if n == 0 {
+        return Vec::new();
+    }
     let mut planner = FftPlanner::<f64>::new();
 
     // Forward FFT
@@ -35,15 +39,12 @@ pub fn analytic_signal(data: &[f64]) -> Vec<Complex<f64>> {
     let mut spectrum: Vec<Complex<f64>> = data.iter().map(|&x| Complex::new(x, 0.0)).collect();
     fft_forward.process(&mut spectrum);
 
-    // One-sided spectral window
-    let half = n / 2;
-    spectrum[0] *= 1.0; // DC – unchanged
-    for sample in spectrum.iter_mut().take(half).skip(1) {
+    // One-sided spectral window. DC is unchanged; so is the Nyquist bin N/2, which only
+    // exists for even N. Odd N has no Nyquist bin: bin (N-1)/2 is a positive frequency.
+    for sample in &mut spectrum[1..n.div_ceil(2)] {
         *sample *= 2.0;
     }
-    // Nyquist bin (index half) is kept unchanged when N is even
-    // Negative-frequency bins are zeroed
-    for sample in spectrum.iter_mut().take(n).skip(half + 1) {
+    for sample in &mut spectrum[n / 2 + 1..] {
         *sample = Complex::new(0.0, 0.0);
     }
 
@@ -152,6 +153,53 @@ mod tests {
         }
     }
 
+    /// Deterministic pseudo-random samples in [-1, 1) (LCG).
+    fn noise(n: usize, seed: u64) -> Vec<f64> {
+        let mut state = seed;
+        (0..n)
+            .map(|_| {
+                state = state
+                    .wrapping_mul(6_364_136_223_846_793_005)
+                    .wrapping_add(1_442_695_040_888_963_407);
+                2.0 * (state >> 11) as f64 / (1u64 << 53) as f64 - 1.0
+            })
+            .collect()
+    }
+
+    /// The real part of the analytic signal is the input itself, for even and odd lengths.
+    #[test]
+    fn analytic_signal_real_part_is_input() {
+        for n in [1, 2, 7, 64, 255] {
+            let x = noise(n, n as u64);
+            let z = analytic_signal(&x);
+            assert_eq!(z.len(), n);
+            for (zi, xi) in z.iter().zip(&x) {
+                assert_abs_diff_eq!(zi.re, *xi, epsilon = 1e-12);
+            }
+        }
+    }
+
+    /// The analytic signal has no negative-frequency content, for even and odd lengths.
+    #[test]
+    fn analytic_signal_is_one_sided() {
+        for n in [8, 9, 64, 255] {
+            let mut z = analytic_signal(&noise(n, 1 + n as u64));
+            FftPlanner::<f64>::new().plan_fft_forward(n).process(&mut z);
+            for (k, c) in z.iter().enumerate().skip(n / 2 + 1) {
+                assert!(
+                    c.norm() < 1e-9,
+                    "n = {n}: bin {k} has magnitude {}",
+                    c.norm()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn analytic_signal_empty_input() {
+        assert!(analytic_signal(&[]).is_empty());
+    }
+
     /// STFT column count matches expected number of windows.
     #[test]
     fn stft_window_count() {
@@ -162,6 +210,34 @@ mod tests {
         let expected_windows = (data.len() - nfft) / step + 1; // (100 - 16) / 8 + 1 = 11
         let result = stft(&data, nfft, overlap);
         assert_eq!(result[0].len(), expected_windows);
+    }
+
+    #[test]
+    #[should_panic(expected = "nfft must be at least 1")]
+    fn stft_rejects_zero_nfft() {
+        stft(&[0.0; 8], 0, 0);
+    }
+
+    #[test]
+    #[should_panic(expected = "no_overlap must be less than nfft")]
+    fn stft_rejects_overlap_of_whole_window() {
+        stft(&[0.0; 8], 4, 4);
+    }
+
+    /// With overlap, window w starts at sample w·(nfft − no_overlap): its DC bin is the sum
+    /// of exactly those samples.
+    #[test]
+    fn stft_overlapping_windows_start_at_step() {
+        let data: Vec<f64> = (0..20).map(f64::from).collect();
+        let (nfft, overlap) = (8, 5);
+        let result = stft(&data, nfft, overlap);
+        assert_eq!(result[0].len(), 5); // (20 − 8) / 3 + 1
+        for (w, dc) in result[0].iter().enumerate() {
+            let start = w * (nfft - overlap);
+            let expected: f64 = data[start..start + nfft].iter().sum();
+            assert_abs_diff_eq!(dc.re, expected, epsilon = 1e-9);
+            assert_abs_diff_eq!(dc.im, 0.0, epsilon = 1e-9);
+        }
     }
 
     /// STFT freq_bins = nfft/2 + 1.
