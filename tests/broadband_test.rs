@@ -36,8 +36,7 @@ const TOL_TARGETED: f64 = 5.0;
 
 fn wav_path(freq_hz: u32, doa_deg: u32, duration_s: &str) -> PathBuf {
     PathBuf::from(format!(
-        "./tests/data/single-source/single-source_{}Hz_{}deg_{}.wav",
-        freq_hz, doa_deg, duration_s
+        "./tests/data/single-source/single-source_{freq_hz}Hz_{doa_deg}deg_{duration_s}.wav"
     ))
 }
 
@@ -45,7 +44,7 @@ fn wav_path(freq_hz: u32, doa_deg: u32, duration_s: &str) -> PathBuf {
 /// with amplitudes normalised to `[−1, 1]`.
 fn read_wav_4ch(path: &PathBuf) -> DMatrix<f64> {
     let mut reader =
-        hound::WavReader::open(path).unwrap_or_else(|e| panic!("Failed to open {:?}: {}", path, e));
+        hound::WavReader::open(path).unwrap_or_else(|e| panic!("Failed to open {path:?}: {e}"));
     let spec = reader.spec();
     assert_eq!(spec.channels, 4, "Expected 4-channel WAV");
     assert_eq!(spec.bits_per_sample, 24, "Expected 24-bit PCM");
@@ -202,16 +201,14 @@ fn ifb_music_broadband_single_source_40deg_neighbourhood_bins() {
     let neighbourhood_bins = neighbourhood_bins(&[300.0, 1400.0, 2500.0], NFFT, SAMPLE_RATE, 2);
 
     let (spectrum, angles) =
-        estimator.ifb_music_spectrum(&data, NFFT, 1, SAMPLE_RATE, Some(&neighbourhood_bins));
+        estimator.ifb_music_spectrum(&data, NFFT, 1, Some(&neighbourhood_bins));
 
     let estimated_deg = find_peak_doa_deg(&spectrum, &angles);
     let err = min_equivalent_error_deg(estimated_deg, 40.0);
 
     assert!(
         err <= TOL_ALL_BINS,
-        "40° composite (neighbourhood bins): expected ~40° (or 320°), got {:.1}° (error {:.1}°)",
-        estimated_deg,
-        err
+        "40° composite (neighbourhood bins): expected ~40° (or 320°), got {estimated_deg:.1}° (error {err:.1}°)"
     );
 }
 
@@ -231,17 +228,14 @@ fn ifb_music_broadband_single_source_40deg_targeted_bins() {
         .map(|&f| freq_to_bin(f, NFFT, SAMPLE_RATE))
         .collect();
 
-    let (spectrum, angles) = estimator.ifb_music_spectrum(&data, NFFT, 1, SAMPLE_RATE, Some(&bins));
+    let (spectrum, angles) = estimator.ifb_music_spectrum(&data, NFFT, 1, Some(&bins));
 
     let estimated_deg = find_peak_doa_deg(&spectrum, &angles);
     let err = min_equivalent_error_deg(estimated_deg, 40.0);
 
     assert!(
         err <= TOL_TARGETED,
-        "40° composite (targeted bins {:?}): expected ~40°, got {:.1}° (error {:.1}°)",
-        bins,
-        estimated_deg,
-        err
+        "40° composite (targeted bins {bins:?}): expected ~40°, got {estimated_deg:.1}° (error {err:.1}°)"
     );
 }
 
@@ -261,15 +255,13 @@ fn ifb_music_broadband_single_source_all_angles_neighbourhood_bins() {
 
     for &doa_deg in &angles_under_test {
         let data = load_composite_source(doa_deg, &freqs, "2.0s");
-        let (spectrum, angles) =
-            estimator.ifb_music_spectrum(&data, NFFT, 1, SAMPLE_RATE, Some(&nbins));
+        let (spectrum, angles) = estimator.ifb_music_spectrum(&data, NFFT, 1, Some(&nbins));
         let estimated_deg = find_peak_doa_deg(&spectrum, &angles);
         let err = min_equivalent_error_deg(estimated_deg, doa_deg as f64);
 
         if err > TOL_ALL_BINS {
             failures.push(format!(
-                "DOA {}° (composite 300+1400+2500 Hz, neighbourhood bins): got {:.1}° (error {:.1}°)",
-                doa_deg, estimated_deg, err
+                "DOA {doa_deg}° (composite 300+1400+2500 Hz, neighbourhood bins): got {estimated_deg:.1}° (error {err:.1}°)"
             ));
         }
     }
@@ -302,15 +294,13 @@ fn ifb_music_broadband_single_source_all_angles_targeted_bins() {
 
     for &doa_deg in &angles_under_test {
         let data = load_composite_source(doa_deg, &freqs, "2.0s");
-        let (spectrum, angles) =
-            estimator.ifb_music_spectrum(&data, NFFT, 1, SAMPLE_RATE, Some(&bins));
+        let (spectrum, angles) = estimator.ifb_music_spectrum(&data, NFFT, 1, Some(&bins));
         let estimated_deg = find_peak_doa_deg(&spectrum, &angles);
         let err = min_equivalent_error_deg(estimated_deg, doa_deg as f64);
 
         if err > TOL_TARGETED {
             failures.push(format!(
-                "DOA {}° (composite 300+1400+2500 Hz, targeted bins {:?}): got {:.1}° (error {:.1}°)",
-                doa_deg, bins, estimated_deg, err
+                "DOA {doa_deg}° (composite 300+1400+2500 Hz, targeted bins {bins:?}): got {estimated_deg:.1}° (error {err:.1}°)"
             ));
         }
     }
@@ -340,16 +330,13 @@ fn ifb_music_broadband_mid_high_freqs_80deg() {
         .map(|&f| freq_to_bin(f, NFFT, SAMPLE_RATE))
         .collect();
 
-    let (spectrum, angles) = estimator.ifb_music_spectrum(&data, NFFT, 1, SAMPLE_RATE, Some(&bins));
+    let (spectrum, angles) = estimator.ifb_music_spectrum(&data, NFFT, 1, Some(&bins));
     let estimated_deg = find_peak_doa_deg(&spectrum, &angles);
     let err = min_equivalent_error_deg(estimated_deg, 80.0);
 
     assert!(
         err <= TOL_TARGETED,
-        "80° mid-high composite (targeted bins {:?}): expected ~80°, got {:.1}° (error {:.1}°)",
-        bins,
-        estimated_deg,
-        err
+        "80° mid-high composite (targeted bins {bins:?}): expected ~80°, got {estimated_deg:.1}° (error {err:.1}°)"
     );
 }
 
@@ -366,16 +353,13 @@ fn ifb_music_broadband_high_freqs_120deg() {
         .map(|&f| freq_to_bin(f, NFFT, SAMPLE_RATE))
         .collect();
 
-    let (spectrum, angles) = estimator.ifb_music_spectrum(&data, NFFT, 1, SAMPLE_RATE, Some(&bins));
+    let (spectrum, angles) = estimator.ifb_music_spectrum(&data, NFFT, 1, Some(&bins));
     let estimated_deg = find_peak_doa_deg(&spectrum, &angles);
     let err = min_equivalent_error_deg(estimated_deg, 120.0);
 
     assert!(
         err <= TOL_TARGETED,
-        "120° high-freq composite (targeted bins {:?}): expected ~120° (or 240°), got {:.1}° (error {:.1}°)",
-        bins,
-        estimated_deg,
-        err
+        "120° high-freq composite (targeted bins {bins:?}): expected ~120° (or 240°), got {estimated_deg:.1}° (error {err:.1}°)"
     );
 }
 
@@ -387,7 +371,7 @@ fn ifb_music_spectrum_output_length_matches_angle_steps() {
     let estimator = MusicEstimator::default(); // 720 angle steps
     let data = load_composite_source(40, &[300, 1400, 2500], "1.0s");
 
-    let (spectrum, angles) = estimator.ifb_music_spectrum(&data, NFFT, 1, SAMPLE_RATE, None);
+    let (spectrum, angles) = estimator.ifb_music_spectrum(&data, NFFT, 1, None);
 
     assert_eq!(spectrum.len(), estimator.angle_steps_num);
     assert_eq!(angles.len(), estimator.angle_steps_num);
@@ -400,7 +384,7 @@ fn ifb_music_spectrum_angles_span_search_interval() {
     let estimator = MusicEstimator::default(); // [0, 2π)
     let data = load_composite_source(40, &[300, 1400, 2500], "1.0s");
 
-    let (_, angles) = estimator.ifb_music_spectrum(&data, NFFT, 1, SAMPLE_RATE, None);
+    let (_, angles) = estimator.ifb_music_spectrum(&data, NFFT, 1, None);
 
     let (start, end) = estimator.search_interval;
     assert!(
@@ -416,10 +400,7 @@ fn ifb_music_spectrum_angles_span_search_interval() {
     for &a in &angles {
         assert!(
             a >= start && a < end,
-            "Angle {:.4} rad outside [{:.4}, {:.4})",
-            a,
-            start,
-            end
+            "Angle {a:.4} rad outside [{start:.4}, {end:.4})"
         );
     }
     let _ = PI; // suppress unused import warning
@@ -431,7 +412,7 @@ fn ifb_music_spectrum_empty_bins_returns_flat() {
     let estimator = MusicEstimator::default();
     let data = load_composite_source(40, &[300, 1400, 2500], "1.0s");
 
-    let (spectrum, angles) = estimator.ifb_music_spectrum(&data, NFFT, 1, SAMPLE_RATE, Some(&[]));
+    let (spectrum, angles) = estimator.ifb_music_spectrum(&data, NFFT, 1, Some(&[]));
 
     assert_eq!(spectrum.len(), estimator.angle_steps_num);
     assert_eq!(angles.len(), estimator.angle_steps_num);
@@ -440,8 +421,7 @@ fn ifb_music_spectrum_empty_bins_returns_flat() {
     for &v in &spectrum {
         assert!(
             (v - 1.0).abs() < 1e-12,
-            "Expected flat spectrum (all 1.0), got {:.6}",
-            v
+            "Expected flat spectrum (all 1.0), got {v:.6}"
         );
     }
 }
@@ -485,8 +465,7 @@ fn test_broadband_single_source_doa_nine_tone() {
     for &doa_deg in &ALL_ANGLES_DEG {
         let data = load_composite_source_n(doa_deg, &ALL_FREQS, "2.0s");
 
-        let (spectrum, angles) =
-            estimator.ifb_music_spectrum(&data, NFFT, 1, SAMPLE_RATE, Some(&bins));
+        let (spectrum, angles) = estimator.ifb_music_spectrum(&data, NFFT, 1, Some(&bins));
         let estimated_deg = find_peak_doa_deg(&spectrum, &angles);
         let err = min_equivalent_error_deg(estimated_deg, doa_deg as f64);
 
@@ -563,14 +542,13 @@ fn test_broadband_single_source_doa_frequency_triples() {
                     let data = load_composite_source(doa_deg, &triple, "2.0s");
 
                     let (spectrum, angles) =
-                        estimator.ifb_music_spectrum(&data, NFFT, 1, SAMPLE_RATE, Some(&bins));
+                        estimator.ifb_music_spectrum(&data, NFFT, 1, Some(&bins));
                     let estimated_deg = find_peak_doa_deg(&spectrum, &angles);
                     let err = min_equivalent_error_deg(estimated_deg, doa_deg as f64);
 
                     if err > tolerance_deg {
                         failures.push(format!(
-                            "DOA {}°, triple {}+{}+{} Hz (bins {:?}): got {:.1}° (error {:.1}°)",
-                            doa_deg, fl, fm, fh, bins, estimated_deg, err
+                            "DOA {doa_deg}°, triple {fl}+{fm}+{fh} Hz (bins {bins:?}): got {estimated_deg:.1}° (error {err:.1}°)"
                         ));
                     }
                     total += 1;
@@ -605,10 +583,10 @@ fn ifb_music_spectrum_values_finite_positive() {
         .iter()
         .map(|&f| freq_to_bin(f, NFFT, SAMPLE_RATE))
         .collect();
-    let (spectrum, _) = estimator.ifb_music_spectrum(&data, NFFT, 1, SAMPLE_RATE, Some(&bins));
+    let (spectrum, _) = estimator.ifb_music_spectrum(&data, NFFT, 1, Some(&bins));
 
     for (i, &v) in spectrum.iter().enumerate() {
-        assert!(v.is_finite(), "spectrum[{}] = {} is not finite", i, v);
-        assert!(v > 0.0, "spectrum[{}] = {} is not positive", i, v);
+        assert!(v.is_finite(), "spectrum[{i}] = {v} is not finite");
+        assert!(v > 0.0, "spectrum[{i}] = {v} is not positive");
     }
 }
