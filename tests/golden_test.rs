@@ -22,13 +22,30 @@ const NFFT: usize = 160;
 // so agreement is ~1e-7..1e-6 rather than machine precision.
 const REL_TOLERANCE: f64 = 1e-4;
 
-const CASES: [(&str, f64); 6] = [
+const CASES: [(&str, f64); 15] = [
     ("single-source_300Hz_80deg_1.0s", 300.0),
     ("single-source_1400Hz_40deg_1.0s", 1400.0),
     ("single-source_4700Hz_120deg_1.0s", 4700.0),
     ("single-source_2500Hz_0deg_2.0s", 2500.0),
     ("single-source_5800Hz_160deg_2.0s", 5800.0),
     ("single-source_6900Hz_120deg_1.0s", 6900.0),
+    // All five angles at 3600 Hz and 6900 Hz, alternating 1 s / 2 s recordings
+    ("single-source_3600Hz_0deg_1.0s", 3600.0),
+    ("single-source_3600Hz_40deg_2.0s", 3600.0),
+    ("single-source_3600Hz_80deg_1.0s", 3600.0),
+    ("single-source_3600Hz_120deg_2.0s", 3600.0),
+    ("single-source_3600Hz_160deg_1.0s", 3600.0),
+    ("single-source_6900Hz_0deg_2.0s", 6900.0),
+    ("single-source_6900Hz_40deg_1.0s", 6900.0),
+    ("single-source_6900Hz_80deg_2.0s", 6900.0),
+    ("single-source_6900Hz_160deg_1.0s", 6900.0),
+];
+
+/// Multi-bin IFB cases: `(frequencies in Hz, DOA in degrees, duration)`; the recordings
+/// at the same DOA are summed and IFB uses one bin per tone.
+const COMPOSITE_CASES: [(&[u32], u32, &str); 2] = [
+    (&[300, 1400, 2500], 40, "2.0s"),
+    (&[3600, 4700, 5800], 120, "1.0s"),
 ];
 
 fn read_golden(name: &str) -> (Vec<f64>, Vec<f64>) {
@@ -124,27 +141,34 @@ fn ifb_spectrum_matches_pymusic() {
     }
 }
 
-/// Multi-bin IFB (geometric mean over one bin per tone) on the sum of three recordings at 40°.
+/// Multi-bin IFB (geometric mean over one bin per tone) on sums of recordings at one DOA.
 #[test]
 fn ifb_multi_bin_spectrum_matches_pymusic() {
     let est = MusicEstimator::default();
-    let freqs = [300, 1400, 2500];
-    let parts: Vec<DMatrix<f64>> = freqs
-        .iter()
-        .map(|&f| common::read_wav_4ch(&common::wav_path(f, 40, "2.0s")).1)
-        .collect();
-    let n = parts.iter().map(|p| p.ncols()).min().unwrap();
-    let data = parts
-        .iter()
-        .fold(DMatrix::zeros(4, n), |acc, p| acc + p.columns(0, n));
-    let bins: Vec<usize> = freqs
-        .iter()
-        .map(|&f| f as usize * NFFT / est.sample_rate as usize)
-        .collect();
-    let (spectrum, angles) = est.ifb_music_spectrum(&data, NFFT, 1, Some(&bins));
-    check(
-        "composite_300+1400+2500Hz_40deg_2.0s.ifb_nfft160_bins3-14-25",
-        &angles,
-        &spectrum,
-    );
+    for (freqs, doa, duration) in COMPOSITE_CASES {
+        let parts: Vec<DMatrix<f64>> = freqs
+            .iter()
+            .map(|&f| common::read_wav_4ch(&common::wav_path(f, doa, duration)).1)
+            .collect();
+        let n = parts.iter().map(|p| p.ncols()).min().unwrap();
+        let data = parts
+            .iter()
+            .fold(DMatrix::zeros(4, n), |acc, p| acc + p.columns(0, n));
+        let bins: Vec<usize> = freqs
+            .iter()
+            .map(|&f| f as usize * NFFT / est.sample_rate as usize)
+            .collect();
+        let (spectrum, angles) = est.ifb_music_spectrum(&data, NFFT, 1, Some(&bins));
+        let tones: Vec<String> = freqs.iter().map(u32::to_string).collect();
+        let bin_names: Vec<String> = bins.iter().map(usize::to_string).collect();
+        check(
+            &format!(
+                "composite_{}Hz_{doa}deg_{duration}.ifb_nfft{NFFT}_bins{}",
+                tones.join("+"),
+                bin_names.join("-")
+            ),
+            &angles,
+            &spectrum,
+        );
+    }
 }
