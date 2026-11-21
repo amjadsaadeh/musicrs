@@ -1,0 +1,90 @@
+You are generating a single git commit message.
+Return only the commit message text. Do not include a preamble, quotes, or code fences.
+
+Rules:
+- First line: imperative mood, <= 72 chars, no trailing period.
+- Optional body: blank line, then short wrapped bullet points or prose explaining WHY.
+- Capture the primary user-visible or developer-visible change.
+- Use only the staged changes below as context.
+- Do not include "Co-authored-by" or other git trailers.
+
+Branch: claude/rust-pymusic-port-HvUsJ
+
+Staged files:
+A	CLAUDE.md
+R100	REAME.md	README.md
+M	src/music.rs
+
+Staged patch:
+```diff
+diff --git a/CLAUDE.md b/CLAUDE.md
+new file mode 100644
+index 0000000..220c63e
+--- /dev/null
++++ b/CLAUDE.md
+@@ -0,0 +1,42 @@
++# CLAUDE.md
++
++This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
++
++## Project
++
++`musicrs` is a Rust library port of [pyMUSIC](https://github.com/amjadsaadeh/pyMUSIC): the MUSIC (MUltiple SIgnal Classification, R. O. Schmidt) algorithm for Direction-of-Arrival (DOA) estimation with microphone arrays. Library crate only (no binary), Rust edition 2024.
++
++## Commands
++
++```sh
++cargo build
++cargo test                                   # unit tests, doctests, integration test
++cargo test --lib                             # unit tests in src/ only
++cargo test --test integration_test           # WAV-based DOA accuracy test
++cargo test estimate_doa_from_rank1_covariance # single test by name filter
++cargo test --test integration_test -- --nocapture  # see the pass summary println
++cargo clippy --all-targets
++cargo fmt
++```
++
++The integration test reads `./tests/data/single-source` with a relative path, so run it from the repo root (cargo does this by default).
++
++## Architecture
++
++Two modules, re-exported from `src/lib.rs` (`MusicEstimator`, `analytic_signal`, `stft`):
++
++- `src/stft.rs` — signal preprocessing with `rustfft`. `analytic_signal` (FFT-based Hilbert transform, turns a real channel into a complex one) and `stft` (returns `[freq_bin][window]`, `nfft/2 + 1` bins, no windowing function).
++- `src/music.rs` — `MusicEstimator` (antenna `[x, y]` positions in metres, angle grid size, search interval in radians, sample rate). Defaults: Kinect 4-mic linear array, 720 steps over [0, 2π), 16 kHz.
++  - Pipeline in `estimate_doa`: covariance `X·Xᴴ/N` → `noise_subspace` (eigenvectors of the smallest `n − n_sources` eigenvalues) → `spectrum` (`1/‖Eₙᴴ a(θ)‖²` over the grid) → `find_peaks` (circular local maxima, highest first). Angles are radians.
++  - `ifb_music_spectrum` is the wideband variant: per-mic STFT, per-bin cross-spectral matrix averaged over windows, narrowband spectra combined by geometric mean.
++  - Linear algebra is split across crates: `nalgebra` (`DMatrix<Complex<f64>>`) is the public/working type; `faer` is used only inside `hermitian_eigen` for the Hermitian eigendecomposition (conversion in and out, results re-sorted ascending since faer does not guarantee order). No LAPACK dependency.
++
++### Sign conventions (fragile, test-driven)
++
++`steering_vector` is tuned to match the analytic-signal phase convention of the test data: positive exponent below Nyquist, negative above Nyquist (aliased bins), and a real `cos(phase)` vector when the frequency is within 0.5 Hz of Nyquist. Changing the eigenvector conjugation in `hermitian_eigen` or these signs breaks the integration test.
++## Tests and data
++
++- `tests/integration_test.rs` runs `estimate_doa` (n_sources = 1, after `analytic_signal` per channel) on every WAV in `tests/data/single-source/` and requires ±5° accuracy. Filenames encode ground truth: `single-source_<freq>Hz_<doa>deg_<duration>s.wav`. Files are 4-channel, 24-bit PCM, 16 kHz, read with `hound`.
++- Because the array is linear along x, θ and 360°−θ are indistinguishable; at Nyquist, 180°±θ are also accepted. The test accounts for this; keep it in mind when interpreting estimates.
++- `tests/data/single-source/README.md` still describes the data as numpy arrays; the files are now WAV (see commit "replace npy files with wav").
++- Unit tests live in `#[cfg(test)]` modules inside each source file and use `approx`.
+diff --git a/REAME.md b/README.md
+similarity index 100%
+rename from REAME.md
+rename to README.md
+diff --git a/src/music.rs b/src/music.rs
+index df57175..8fea715 100644
+--- a/src/music.rs
++++ b/src/music.rs
+@@ -59,9 +59,9 @@ fn hermitian_eigen(mat: &CMatrix) -> (Vec<f64>, CMatrix) {
+     });
+ 
+     let eigenvalues: Vec<f64> = order.iter().map(|&i| s_col.read(i).re).collect();
+-    // faer's selfadjoint_eigendecomposition returns eigenvectors with conjugated
+-    // imaginary parts relative to the signal-processing convention.  Negate im to
+-    // recover the eigenvectors in the standard A·v = λ·v convention expected by MUSIC.
++    // Copy the eigenvectors (reordered by ascending eigenvalue) back into nalgebra.
++    // faer's eigenvectors already satisfy A·v = λ·v, so no conjugation is applied;
++    // the steering-vector sign convention in `steering_vector` is matched to this.
+     let eigenvectors: CMatrix = CMatrix::from_fn(n, n, |row, col| {
+         let src_col = order[col];
+         let c = u_mat.read(row, src_col);
+
+```
