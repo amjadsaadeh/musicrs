@@ -44,6 +44,7 @@ jobs:
         run: |
           cargo nextest run \
             --profile ci \
+            --run-ignored all \
             --no-fail-fast \
             2>&1
 

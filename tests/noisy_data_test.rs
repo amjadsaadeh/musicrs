@@ -245,6 +245,7 @@ fn run_noisy_doa_test(snr_db: f64, tolerance_deg: f64) {
 /// operating regime for MUSIC. Tolerances are widened slightly compared with
 /// the clean-signal baseline (±5°) to account for residual estimation error.
 #[test]
+#[ignore = "slow"]
 fn test_single_source_doa_noisy_10db() {
     run_noisy_doa_test(10.0, 10.0);
 }
@@ -254,6 +255,7 @@ fn test_single_source_doa_noisy_10db() {
 /// At 5 dB signal and noise are of comparable magnitude. MUSIC degrades
 /// gracefully but some additional angular error is expected.
 #[test]
+#[ignore = "slow"]
 fn test_single_source_doa_noisy_5db() {
     run_noisy_doa_test(5.0, 15.0);
 }
@@ -264,6 +266,7 @@ fn test_single_source_doa_noisy_5db() {
 /// lower bound of practical MUSIC performance with the available recording
 /// length and array geometry.
 #[test]
+#[ignore = "slow"]
 fn test_single_source_doa_noisy_1db() {
     run_noisy_doa_test(1.0, 20.0);
 }
