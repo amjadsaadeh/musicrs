@@ -1,0 +1,1 @@
+add to the claude.md: changes are made in branches "feat/<feature name>" for new features "fix/<bugfix name". structure your work in reasonably sized commits
