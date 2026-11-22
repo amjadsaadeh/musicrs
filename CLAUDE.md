@@ -55,7 +55,7 @@ docs/benchmark*.svg              # charts shown in the README (light and dark), 
 - `analytic_signal()` — converts real signal to complex via Hilbert transform (FFT-based)
 - `stft()` — Short-Time Fourier Transform with configurable window and overlap
 
-- `MusicError` — bad data (wrong row count or covariance shape, no samples, NaN/inf, silence) and bad parameters (too many sources, angle grid incl. spans over 2π, frequency ≤ 0 or non-finite, sample rate, antenna positions, `nfft`, overlap, threshold, no usable bins) are returned as `Err`; the public API does not panic on them and does not return a quiet wrong answer. The estimator's fields are checked where they are used, not in `new()`, because the fields are public. `noise_subspace` reads only the lower triangle of `cov`; IFB never uses the DC bin
+- `MusicError` — bad data (wrong row count or covariance shape, no samples, NaN/inf, silence) and bad parameters (too many or zero sources, angle grid incl. spans over 2π, frequency ≤ 0 or non-finite, sample rate, antenna positions, `nfft`, overlap, threshold, no usable bins) are returned as `Err`; the public API does not panic on them and does not return a quiet wrong answer. The estimator's fields are checked where they are used, not in `new()`, because the fields are public. `noise_subspace` reads only the lower triangle of `cov`; IFB never uses the DC bin
 
 **Core algorithm flow:**
 1. Compute covariance matrix of complex multichannel input
