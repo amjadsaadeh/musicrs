@@ -1,0 +1,8 @@
+CPU: Intel(R) N150, 3 cores
+Kernel: Linux 7.0.14-12-pve
+rustc 1.88.0 (6b00bc388 2025-06-23)
+Python 3.10.20 / numpy 1.23.5
+pyMUSIC: 766b8fe
+pySoundToolbox: 1d03489
+Governor: performance
+Date: 2026-11-22
