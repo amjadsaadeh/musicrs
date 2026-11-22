@@ -587,6 +587,11 @@ impl MusicEstimator {
     /// # Returns
     /// Up to `n_sources` estimated angles (radians), sorted by descending peak height.
     ///
+    /// The sources must be uncorrelated. Coherent sources (the same tone from two
+    /// directions with a fixed phase relation, such as two loudspeakers on one signal or a
+    /// reflection) give a covariance of rank 1, like a single source, and the estimates
+    /// point in neither direction.
+    ///
     /// # Errors
     /// - [`MusicError::RowCountMismatch`] if `data` does not have one row per antenna.
     /// - [`MusicError::EmptyData`] if it has no samples, [`MusicError::NonFiniteData`]

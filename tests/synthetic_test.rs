@@ -109,6 +109,64 @@ fn square_array_two_sources() {
     assert_angles(&est.estimate_doa(&data, 2, freq).unwrap(), &doas_deg, 1.0);
 }
 
+/// MUSIC needs uncorrelated sources. Two plane waves of the same tone with a fixed phase
+/// relation (two loudspeakers on one signal, or a reflection) are coherent: the covariance
+/// has rank 1, as for a single source, and the estimates land on neither direction. The
+/// same two waves with an independent random phase per sample are found exactly.
+#[test]
+fn coherent_sources_are_not_resolved() {
+    let est = square_array();
+    let freq = 1500.0;
+    let n_samples = 4000;
+    let doas_deg = [50.0_f64, 200.0];
+    let jitter = uniform(n_samples, 3);
+    let waves = |decorrelate: bool| {
+        DMatrix::from_fn(4, n_samples, |m, t| {
+            let p = est.antenna_positions[m];
+            let t_s = t as f64 / SAMPLE_RATE;
+            let phases = [
+                0.0,
+                if decorrelate {
+                    2.0 * PI * jitter[t]
+                } else {
+                    1.0
+                },
+            ];
+            doas_deg
+                .iter()
+                .zip(phases)
+                .map(|(&d, phi)| {
+                    Complex::from_polar(
+                        1.0,
+                        2.0 * PI * freq * (t_s + advance(p, d.to_radians())) + phi,
+                    )
+                })
+                .sum::<Complex<f64>>()
+        })
+    };
+    assert_angles(
+        &est.estimate_doa(&waves(true), 2, freq).unwrap(),
+        &doas_deg,
+        1.0,
+    );
+
+    let coherent = est.estimate_doa(&waves(false), 2, freq).unwrap();
+    let worst = doas_deg
+        .iter()
+        .map(|&truth| {
+            coherent
+                .iter()
+                .map(|a| common::angular_error(a.to_degrees(), &[truth]))
+                .fold(f64::INFINITY, f64::min)
+        })
+        .fold(0.0, f64::max);
+    println!(
+        "coherent: {:?}",
+        coherent.iter().map(|a| a.to_degrees()).collect::<Vec<_>>()
+    );
+    assert!(worst > 5.0, "coherent sources were resolved: {coherent:?}");
+}
+
 /// Three sources on a five-element array (the most an n-element array resolves is n − 1).
 #[test]
 fn pentagon_array_three_sources() {
