@@ -192,6 +192,36 @@ fn kinect_tone(est: &MusicEstimator, freq: f64, doa_deg: f64, n_samples: usize) 
     })
 }
 
+/// Very loud and very quiet recordings give the same answer: the data is rescaled before
+/// its energy and covariance are computed, which would otherwise overflow (or underflow).
+#[test]
+fn extreme_amplitudes() {
+    let est = MusicEstimator {
+        search_interval: (0.0, PI),
+        angle_steps_num: 360,
+        ..MusicEstimator::default()
+    };
+    let data = kinect_tone(&est, 1000.0, 40.0, 4000);
+    let argmax = |s: &[f64]| (0..s.len()).max_by(|&a, &b| s[a].total_cmp(&s[b])).unwrap();
+    for amplitude in [1.0, 1e160, 1e300, 1e-160, 1e-300] {
+        let scaled = &data * amplitude;
+        let found = est.estimate_doa_from_real(&scaled, 1, 1000.0).unwrap();
+        assert_eq!(found.len(), 1, "amplitude {amplitude}");
+        assert!(
+            (found[0].to_degrees() - 40.0).abs() <= 0.5,
+            "amplitude {amplitude}: got {found:?}"
+        );
+        let (spectrum, angles) = est
+            .ifb_music_spectrum(&scaled, 160, 1, Some(&[10]))
+            .unwrap();
+        let peak = angles[argmax(&spectrum)].to_degrees();
+        assert!(
+            (peak - 40.0).abs() <= 0.5,
+            "amplitude {amplitude}: IFB peak {peak}°"
+        );
+    }
+}
+
 /// Zero sources and frequency 0 (every steering vector is the same, so the spectrum is
 /// flat) have nothing to find and return no angles. An empty search grid is an error.
 #[test]

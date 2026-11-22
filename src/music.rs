@@ -235,6 +235,24 @@ pub fn select_bins_by_energy(
     Ok((1..power.len()).filter(|&k| power[k] >= floor).collect())
 }
 
+/// A power of two close to `max_abs`, the largest absolute value in some data, to divide
+/// the data by. MUSIC does not depend on the data's scale, and dividing by a power of two
+/// is exact, so this changes no result: it only keeps the sums of squares in the
+/// covariance and energy from overflowing for very loud data (or underflowing for very
+/// quiet data).
+fn power_of_two_scale(max_abs: f64) -> f64 {
+    if max_abs > 0.0 {
+        2f64.powi((max_abs.log2().floor() as i32).clamp(-1000, 1000))
+    } else {
+        1.0
+    }
+}
+
+/// `data` divided by [`power_of_two_scale`] of its largest absolute value.
+fn normalised_real(data: &DMatrix<f64>) -> DMatrix<f64> {
+    data / power_of_two_scale(data.amax())
+}
+
 /// Checks that real data has samples and that all of them are finite.
 fn check_real_samples(data: &DMatrix<f64>) -> Result<()> {
     if data.is_empty() {
@@ -519,8 +537,13 @@ impl MusicEstimator {
         if !data.iter().all(|c| c.re.is_finite() && c.im.is_finite()) {
             return Err(MusicError::NonFiniteData);
         }
+        let max_abs = data
+            .iter()
+            .fold(0.0, |m: f64, c| m.max(c.re.abs()).max(c.im.abs()));
+        let scale = power_of_two_scale(max_abs);
+        let data = data.map(|c| c / scale);
         let n_samples = data.ncols() as f64;
-        let cov = (data * data.adjoint()).scale(1.0 / n_samples);
+        let cov = (&data * data.adjoint()).scale(1.0 / n_samples);
         if cov.trace().re == 0.0 {
             return Err(MusicError::SilentData);
         }
@@ -578,6 +601,7 @@ impl MusicEstimator {
     ) -> Result<Vec<f64>> {
         self.check_rows(data.nrows())?;
         check_real_samples(data)?;
+        let data = &normalised_real(data);
         let mut complex = CMatrix::zeros(data.nrows(), data.ncols());
         let (mut raw_energy, mut centred_energy) = (0.0, 0.0);
         for m in 0..data.nrows() {
@@ -643,6 +667,7 @@ impl MusicEstimator {
                 samples: data.ncols(),
             });
         }
+        let data = &normalised_real(data);
         let n_mics = data.nrows();
         let freq_bins = nfft / 2 + 1;
 
