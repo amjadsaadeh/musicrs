@@ -1,0 +1,82 @@
+/review
+
+---
+
+<task-notification>
+<task-id>a47486b02340933c8</task-id>
+<output-file>/tmp/claude-1000/-home-orchid-projects-musicrs/f351142b-2bd5-4ca1-b6cb-1486ddf7f149/tasks/a47486b02340933c8.output</output-file>
+<status>completed</status>
+<summary>Agent "/code-review" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>I found 8 findings in the branch diff (merge-base `fc1df26` to HEAD; I skipped the golden CSV contents). Only the first two would affect callers in practice. Nothing was compiled or run; every finding comes from reading the code.
+
+```json
+[
+  {
+    "file": "src/music.rs",
+    "line": 573,
+    "summary": "`estimate_doa_from_real` reports a loud but valid recording as `SilentData`. Samples above about 1e154 make both `raw_energy` and `centred_energy` overflow to +inf, and `inf &lt;= 1e-20 * inf` is true. Fix: test the ratio only when `raw_energy` is finite, or return `NonFiniteData` on overflow; or compute the energies on data scaled by its largest absolute value.",
+    "failure_scenario": "A 4×1000 tone with amplitude 1e160 (finite, passes `check_real_samples`) returns `Err(SilentData)`, which tells the caller there is no signal. The real problem is numeric overflow.",
+    "severity": "important"
+  },
+  {
+    "file": "src/music.rs",
+    "line": 108,
+    "summary": "A one-point search grid no longer returns a DOA. The new `find_peaks` returns early when `runs.len() == 1`, which is always the case when `len == 1`. Before, a single point on an open grid had no neighbours and counted as a peak. Fix: return early only when `len &gt; 1` and the spectrum is constant, or treat a single non-circular point as a peak as before.",
+    "failure_scenario": "`MusicEstimator { angle_steps_num: 1, search_interval: (0.0, PI), .. }` with `estimate_doa(&amp;data, 1, f)` used to return `[0.0]` and now returns `Ok(vec![])`.",
+    "severity": "important"
+  },
+  {
+    "file": "src/music.rs",
+    "line": 333,
+    "summary": "This branch conflicts with main. Main has since merged PR #13 (\"validate estimator inputs\"), which adds a panicking `assert_valid_angle_grid` to `new()` and `angle_grid()`. That contradicts this branch's rule that the public API never panics. Both sides edit the same `angle_grid`/`new` lines. Fix: rebase onto main and turn the grid validation into a `MusicError` variant instead of keeping the asserts.",
+    "failure_scenario": "After merging, `angle_steps_num: 0` either panics through main's assert, which breaks this branch's `degenerate_configurations_find_nothing` test (it expects `Ok(vec![])`), or the conflict is resolved by hand without a decision on the policy.",
+    "severity": "important"
+  },
+  {
+    "file": "src/music.rs",
+    "line": 683,
+    "summary": "IFB treats a bin as silent if it is 200 dB below the strongest bin, and the strongest bin includes DC. Unlike `estimate_doa_from_real`, `ifb_music_spectrum` does not remove the mean, so a large DC offset raises the bar for every real bin. The same check in `estimate_doa_from_real` (line 573) also flags a tiny signal on a huge offset as silent. Fix: measure `strongest` over the bins actually requested (excluding DC), or remove each channel's mean first.",
+    "failure_scenario": "Data with a DC offset of 1e6 and a 1e-5 amplitude tone. In IFB the tone bin's trace is about 1e-10 × n_windows against a DC power of about 1e12 × nfft², so it is skipped and the call returns `Err(SilentData)`. `estimate_doa_from_real` also returns `SilentData` (ratio about 1e-22).",
+    "severity": "nit"
+  },
+  {
+    "file": "src/music.rs",
+    "line": 426,
+    "summary": "A covariance with the wrong number of columns is reported as a row mismatch. `noise_subspace` calls `check_rows(cov.ncols())`, so a 4×3 matrix gives `RowCountMismatch { expected: 4, got: 3 }` and the message \"expected 4 rows …, got 3\", although it has 4 rows. Fix: add a separate check (or variant) for non-square or column mismatch.",
+    "failure_scenario": "`est.noise_subspace(&amp;DMatrix::identity(4, 3), 1)` produces the error text \"expected 4 rows (one per antenna), got 3\" for a matrix that has 4 rows.",
+    "severity": "nit"
+  },
+  {
+    "file": "src/lib.rs",
+    "line": 43,
+    "summary": "`pub use error::{MusicError, Result}` puts a one-parameter `Result` alias at the crate root. A downstream `use musicrs::*;` replaces `std::result::Result` with it, so any `Result&lt;T, E&gt;` in that module fails to compile. Fix: keep the alias under `musicrs::error::Result` only, or rename it (e.g. `MusicResult`).",
+    "failure_scenario": "User code with `use musicrs::*; fn f() -&gt; Result&lt;(), std::io::Error&gt;` fails with \"type alias takes 1 generic argument but 2 were supplied\".",
+    "severity": "nit"
+  },
+  {
+    "file": "src/music.rs",
+    "line": 120,
+    "summary": "For a plateau that wraps around the circle, `find_peaks` computes the midpoint with `angles[0] + step * (mid - len)`, or adds steps past `angles[a]`. The result can lie past the last grid angle or before `start` and is never wrapped back into the search interval, so callers can get angles outside `[start, end)`. Fix: wrap the result modulo the interval span (or 2π) before returning it.",
+    "failure_scenario": "On a full-circle grid, a plateau on the last and first points (as in the `[3,1,0,0,1,3]` test) returns 5.5 on a 0..6 grid, i.e. an angle above the last grid point. With a shifted interval such as `(-half_step, 2π - half_step)`, the midpoint can come out as about -half_step/2 or about 2π, depending on which side `a` lies.",
+    "severity": "nit"
+  },
+  {
+    "file": "src/music.rs",
+    "line": 368,
+    "summary": "The `steering_vector` doc says element j is `exp(−i·2π·f·τⱼ)`, but the code uses `+phase` below Nyquist. CLAUDE.md says: \"musicrs uses a non-conjugated analytic signal with an `exp(+j2πfτ)` steering vector\". Main fixed this doc in PR #13, but this branch still has the wrong text. Fix: take main's doc text when rebasing.",
+    "failure_scenario": "A reader following the docs builds data with the `exp(−j…)` convention and gets mirrored DOA estimates.",
+    "severity": "pre_existing"
+  }
+]
+```</result>
+<usage><subagent_tokens>99028</subagent_tokens><tool_uses>30</tool_uses><duration_ms>103692</duration_ms></usage>
+</task-notification>
+
+---
+
+yes
+
+---
+
+go
