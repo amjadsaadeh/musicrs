@@ -39,6 +39,6 @@ pub mod error;
 pub mod music;
 pub mod stft;
 
-pub use error::{MusicError, Result};
+pub use error::MusicError;
 pub use music::{MusicEstimator, select_bins_by_energy};
 pub use stft::{analytic_signal, stft};

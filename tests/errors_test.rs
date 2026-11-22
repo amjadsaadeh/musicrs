@@ -76,19 +76,21 @@ fn estimate_doa_errors() {
 #[test]
 fn noise_subspace_and_spectrum_errors() {
     let est = MusicEstimator::default();
+    for (rows, cols) in [(3, 3), (4, 3), (3, 4)] {
+        assert_eq!(
+            est.noise_subspace(&DMatrix::identity(rows, cols), 1),
+            Err(MusicError::CovarianceShape {
+                n_antennas: 4,
+                rows,
+                cols
+            })
+        );
+    }
     assert_eq!(
-        est.noise_subspace(&DMatrix::identity(3, 3), 1),
-        Err(MusicError::RowCountMismatch {
-            expected: 4,
-            got: 3
-        })
-    );
-    assert_eq!(
-        est.noise_subspace(&DMatrix::identity(4, 3), 1),
-        Err(MusicError::RowCountMismatch {
-            expected: 4,
-            got: 3
-        })
+        est.noise_subspace(&DMatrix::identity(4, 3), 1)
+            .unwrap_err()
+            .to_string(),
+        "covariance matrix is 4 × 3, expected 4 × 4 (one row and column per antenna)"
     );
     let mut nan = DMatrix::identity(4, 4);
     nan[(0, 1)] = Complex::new(f64::NAN, 0.0);
@@ -104,6 +106,30 @@ fn noise_subspace_and_spectrum_errors() {
             got: 3
         })
     );
+}
+
+/// Constant data is silent once its mean is removed, whatever the constant and length:
+/// the rounding residue stays below the silence threshold.
+#[test]
+fn constant_data_is_silent() {
+    let est = MusicEstimator::default();
+    for c in [0.3, -0.1, 1.0 / 3.0, PI * 1e5, 1e6 + 0.3, 7e-9, 1e12 / 7.0] {
+        for n in [2, 3, 1000, 1601, 16000] {
+            let data = DMatrix::from_element(4, n, c);
+            assert_eq!(
+                est.estimate_doa_from_real(&data, 1, 1000.0),
+                Err(MusicError::SilentData),
+                "c = {c}, n = {n}"
+            );
+            if n >= NFFT {
+                assert_eq!(
+                    est.ifb_music_spectrum(&data, NFFT, 1, None),
+                    Err(MusicError::SilentData),
+                    "IFB: c = {c}, n = {n}"
+                );
+            }
+        }
+    }
 }
 
 /// An unusable angle grid is an error wherever the grid is searched. `new` does not check

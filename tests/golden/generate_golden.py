@@ -4,7 +4,8 @@ Usage (from the repo root):
 
     git clone https://github.com/amjadsaadeh/pyMUSIC /path/to/pyMUSIC
     git clone https://github.com/Trion/pySoundToolbox /path/to/pySoundToolbox
-    uv run --python 3.10 --with 'numpy==1.23.5' python -I tests/golden/generate_golden.py \
+    uv run --python 3.10 --with 'numpy==1.23.5' --with 'scipy==1.10.1' \
+        python -I tests/golden/generate_golden.py \
         /path/to/pyMUSIC /path/to/pySoundToolbox
 
 pyMUSIC was written against an old numpy/Python 2. numpy 1.23 still has the
@@ -22,7 +23,9 @@ Each case is computed twice:
     depends on an arbitrary basis. Only its peak location is meaningful; musicrs
     (which uses a Hermitian solver) is compared value-by-value against `eigh`.
 
-Output: CSVs in tests/golden/, columns `angle_rad,spectrum`.
+Output: CSVs in tests/golden/, columns `angle_rad,spectrum`; and `*.hilbert_n<N>.scipy.csv`
+(columns `re,im`), the analytic signal from `scipy.signal.hilbert`, which does not
+depend on pyMUSIC.
 """
 
 import os
@@ -31,6 +34,7 @@ import types
 import wave
 
 import numpy as np
+import scipy.signal
 
 pymusic_dir, toolbox_dir = sys.argv[1], sys.argv[2]
 
@@ -100,6 +104,80 @@ COMPOSITE_CASES = [
     ("composite_3600+4700+5800Hz_120deg_1.0s", [3600, 4700, 5800], 120, "1.0s"),
 ]
 
+# Narrowband with a search interval other than the full circle:
+# (recording, frequency, interval name, interval in rad). 360 steps keep the 0.5° grid.
+INTERVAL_CASES = [
+    ("single-source_1400Hz_40deg_1.0s.wav", 1400, "0-180deg", (0, np.pi)),
+    ("single-source_4700Hz_120deg_1.0s.wav", 4700, "180-360deg", (np.pi, 2 * np.pi)),
+]
+
+# IFB at other STFT sizes: (recording, nfft, bins). nfft 320 has 50 Hz bins, so the tone
+# is on a bin; at nfft 1024 (15.625 Hz bins) it falls between the two bins used.
+NFFT_CASES = [
+    ("single-source_1400Hz_40deg_1.0s.wav", 320, [28]),
+    ("single-source_4700Hz_120deg_1.0s.wav", 320, [94]),
+    ("single-source_1400Hz_40deg_1.0s.wav", 1024, [89, 90]),
+    ("single-source_4700Hz_120deg_1.0s.wav", 1024, [300, 301]),
+]
+
+# Narrowband with two sources: the sum of two recordings at different angles and
+# frequencies (same-frequency recordings would be coherent, giving a rank-1 covariance).
+# The second tone is off the analysed frequency, but the covariance has rank 2, so its
+# two-dimensional noise subspace is well defined. (parts, analysed frequency, duration)
+TWO_SOURCE_CASES = [
+    ([(1400, 40), (2500, 120)], 1400, "1.0s"),
+]
+
+# Analytic signal vs scipy: (recording, channel, lengths): even and odd lengths.
+HILBERT_CASES = [
+    ("single-source_1400Hz_40deg_1.0s.wav", 0, [2048, 2047]),
+]
+
+
+def narrowband(est, data, freq, n_sources=1):
+    analytic = np.matrix(np.vstack([pyMUSIC.genAnalyticSignal(row) for row in data]).astype(np.complex128))
+    cov = (analytic * analytic.H) / data.shape[1]
+    noise_mat = est.getNoiseMat(cov, n_sources)
+    return est.getSpectrum(noise_mat, freq)
+
+
+def run_interval(fname, freq, interval_name, interval, solver):
+    data = read_wav_4ch(os.path.join(DATA_DIR, fname))
+    est = pyMUSIC.MUSICEst(angleStepsNum=360, searchInterval=interval)
+    spectrum, angles = narrowband(est, data, freq)
+    write_csv(f"{fname[:-4]}.narrowband_{interval_name}.{solver}.csv", spectrum, angles[:360])
+    print("wrote", fname, interval_name, solver)
+
+
+def run_nfft(fname, nfft, bins, solver):
+    data = read_wav_4ch(os.path.join(DATA_DIR, fname))
+    est = pyMUSIC.MUSICEst()
+    spectrum, angles = pyMUSIC.IFBMUSICSpectrum(data, est.antennaPositions, nfft, bins=bins)
+    write_csv(f"{fname[:-4]}.ifb_nfft{nfft}_bins{'-'.join(map(str, bins))}.{solver}.csv", spectrum, angles)
+    print("wrote", fname, nfft, bins, solver)
+
+
+def run_two_sources(parts, freq, duration, solver):
+    datas = [read_wav_4ch(os.path.join(DATA_DIR, f"single-source_{f}Hz_{doa}deg_{duration}.wav")) for f, doa in parts]
+    n = min(d.shape[1] for d in datas)
+    data = sum(d[:, :n] for d in datas)
+    spectrum, angles = narrowband(pyMUSIC.MUSICEst(), data, freq, n_sources=2)
+    name = "+".join(f"{f}Hz_{doa}deg" for f, doa in parts)
+    write_csv(f"composite_{name}_{duration}.narrowband_{freq}Hz_2src.{solver}.csv", spectrum, angles)
+    print("wrote", name, solver)
+
+
+def run_hilbert(fname, channel, lengths):
+    data = read_wav_4ch(os.path.join(DATA_DIR, fname))
+    for n in lengths:
+        z = scipy.signal.hilbert(data[channel, :n])
+        with open(os.path.join(OUT_DIR, f"{fname[:-4]}.ch{channel}.hilbert_n{n}.scipy.csv"), "w") as f:
+            f.write("re,im\n")
+            for c in z:
+                f.write(f"{float(c.real)!r},{float(c.imag)!r}\n")
+        print("wrote hilbert", fname, n)
+
+
 def run_case(fname, freq, solver):
     data = read_wav_4ch(os.path.join(DATA_DIR, fname))
     stem = fname[: -len(".wav")]
@@ -137,4 +215,13 @@ for solver, eig in [("eig", original_eig), ("eigh", np.linalg.eigh)]:
         run_case(fname, freq, solver)
     for name, freqs, doa, duration in COMPOSITE_CASES:
         run_composite(name, freqs, doa, duration, solver)
+    for fname, freq, interval_name, interval in INTERVAL_CASES:
+        run_interval(fname, freq, interval_name, interval, solver)
+    for fname, nfft, bins in NFFT_CASES:
+        run_nfft(fname, nfft, bins, solver)
+    for parts, freq, duration in TWO_SOURCE_CASES:
+        run_two_sources(parts, freq, duration, solver)
 np.linalg.eig = original_eig
+
+for fname, channel, lengths in HILBERT_CASES:
+    run_hilbert(fname, channel, lengths)

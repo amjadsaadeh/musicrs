@@ -12,10 +12,11 @@ use crate::stft::{analytic_signal, stft};
 /// Speed of sound in air at ~20 °C, in metres per second.
 const SPEED_OF_SOUND: f64 = 343.2;
 
-/// Power ratio (−200 dB) below which a signal counts as silent: far below any real noise
-/// floor, but above the rounding residue left by removing a constant offset or by FFT
-/// leakage from an on-bin tone.
-const SILENCE_RATIO: f64 = 1e-20;
+/// Power ratio (−260 dB) below which a signal counts as silent: above the rounding residue
+/// left by removing a constant offset or by FFT leakage from an on-bin tone (about
+/// ε² ≈ 5e-32 times a small factor), but low enough that a quiet tone on a large DC
+/// offset (say 1e-5 on 1e6, a ratio of 1e-22) still counts as signal.
+const SILENCE_RATIO: f64 = 1e-26;
 
 /// Default Kinect microphone array positions `(x, y)` in metres.
 const DEFAULT_ANTENNA_POSITIONS: [[f64; 2]; 4] =
@@ -90,7 +91,8 @@ fn hermitian_eigen(mat: &CMatrix) -> (Vec<f64>, CMatrix) {
 /// With `circular` (the grid covers the full circle), the first and last points are
 /// neighbours and a run may wrap around. Otherwise they are the two ends of an open range
 /// with only one neighbour each, so a spectrum still rising at an end of the range peaks
-/// there. A spectrum that is constant over the whole grid has no peak.
+/// there. A spectrum that is constant over a grid of two or more points has no peak; a
+/// one-point open grid peaks at its only point.
 fn find_peaks(scores: &[f64], angles: &[f64], n: usize, circular: bool) -> Vec<f64> {
     let len = scores.len();
     if len == 0 || n == 0 {
@@ -107,7 +109,13 @@ fn find_peaks(scores: &[f64], angles: &[f64], n: usize, circular: bool) -> Vec<f
         }
     }
     if runs.len() == 1 {
-        return Vec::new();
+        // A single point on an open range has no neighbours, so it is a peak (as for
+        // `angle_steps_num = 1`); a longer constant spectrum has none.
+        return if len == 1 && !circular {
+            vec![angles[0]]
+        } else {
+            Vec::new()
+        };
     }
     // On the circle, a run at the start continues the run at the end. Its indices then
     // go past `len` and are taken modulo `len`.
@@ -233,6 +241,43 @@ pub fn select_bins_by_energy(
     }
     let floor = strongest * 10f64.powf(-threshold_db / 10.0);
     Ok((1..power.len()).filter(|&k| power[k] >= floor).collect())
+}
+
+/// A power of two close to `max_abs`, the largest absolute value in some data, to divide
+/// the data by. MUSIC does not depend on the data's scale, and dividing by a power of two
+/// is exact, so this changes no result: it only keeps the sums of squares in the
+/// covariance and energy from overflowing for very loud data (or underflowing for very
+/// quiet data).
+fn power_of_two_scale(max_abs: f64) -> f64 {
+    if max_abs > 0.0 {
+        2f64.powi((max_abs.log2().floor() as i32).clamp(-1000, 1000))
+    } else {
+        1.0
+    }
+}
+
+/// `data` divided by [`power_of_two_scale`] of its largest absolute value.
+fn normalised_real(data: &DMatrix<f64>) -> DMatrix<f64> {
+    data / power_of_two_scale(data.amax())
+}
+
+/// The mean of `values`, summed with Neumaier's compensated summation so that it is
+/// correct to about one ulp: subtracting it from constant data then leaves (almost)
+/// nothing, which [`SILENCE_RATIO`] relies on. With a plain sum, 16000 samples of 0.3
+/// leave a residue above the threshold.
+fn accurate_mean<'a>(values: impl ExactSizeIterator<Item = &'a f64>) -> f64 {
+    let n = values.len() as f64;
+    let (mut sum, mut compensation) = (0.0_f64, 0.0_f64);
+    for &x in values {
+        let t = sum + x;
+        compensation += if sum.abs() >= x.abs() {
+            (sum - t) + x
+        } else {
+            (x - t) + sum
+        };
+        sum = t;
+    }
+    (sum + compensation) / n
 }
 
 /// Checks that real data has samples and that all of them are finite.
@@ -435,12 +480,18 @@ impl MusicEstimator {
     /// * `n_sources` – Number of signal sources (must be < n_antennas).
     ///
     /// # Errors
-    /// [`MusicError::RowCountMismatch`] if `cov` is not n_antennas × n_antennas,
+    /// [`MusicError::CovarianceShape`] if `cov` is not n_antennas × n_antennas,
     /// [`MusicError::NonFiniteData`] if it contains NaN or infinity, and
     /// [`MusicError::TooManySources`] if `n_sources >= n_antennas`.
     pub fn noise_subspace(&self, cov: &CMatrix, n_sources: usize) -> Result<CMatrix> {
-        self.check_rows(cov.nrows())?;
-        self.check_rows(cov.ncols())?;
+        let n = self.n_antennas();
+        if cov.shape() != (n, n) {
+            return Err(MusicError::CovarianceShape {
+                n_antennas: n,
+                rows: cov.nrows(),
+                cols: cov.ncols(),
+            });
+        }
         self.check_sources(n_sources)?;
         if !cov.iter().all(|c| c.re.is_finite() && c.im.is_finite()) {
             return Err(MusicError::NonFiniteData);
@@ -519,8 +570,13 @@ impl MusicEstimator {
         if !data.iter().all(|c| c.re.is_finite() && c.im.is_finite()) {
             return Err(MusicError::NonFiniteData);
         }
+        let max_abs = data
+            .iter()
+            .fold(0.0, |m: f64, c| m.max(c.re.abs()).max(c.im.abs()));
+        let scale = power_of_two_scale(max_abs);
+        let data = data.map(|c| c / scale);
         let n_samples = data.ncols() as f64;
-        let cov = (data * data.adjoint()).scale(1.0 / n_samples);
+        let cov = (&data * data.adjoint()).scale(1.0 / n_samples);
         if cov.trace().re == 0.0 {
             return Err(MusicError::SilentData);
         }
@@ -547,7 +603,7 @@ impl MusicEstimator {
     ///
     /// # Errors
     /// As [`estimate_doa`](Self::estimate_doa); data that is constant on every channel (its
-    /// energy after removing the mean is 200 dB below the input's) is
+    /// energy after removing the mean is 260 dB below the input's) is
     /// [`MusicError::SilentData`].
     ///
     /// # Examples
@@ -578,10 +634,11 @@ impl MusicEstimator {
     ) -> Result<Vec<f64>> {
         self.check_rows(data.nrows())?;
         check_real_samples(data)?;
+        let data = &normalised_real(data);
         let mut complex = CMatrix::zeros(data.nrows(), data.ncols());
         let (mut raw_energy, mut centred_energy) = (0.0, 0.0);
         for m in 0..data.nrows() {
-            let mean = data.row(m).mean();
+            let mean = accurate_mean(data.row(m).iter());
             let row: Vec<f64> = data.row(m).iter().map(|x| x - mean).collect();
             raw_energy += data.row(m).norm_squared();
             centred_energy += row.iter().map(|x| x * x).sum::<f64>();
@@ -643,6 +700,7 @@ impl MusicEstimator {
                 samples: data.ncols(),
             });
         }
+        let data = &normalised_real(data);
         let n_mics = data.nrows();
         let freq_bins = nfft / 2 + 1;
 
@@ -1171,6 +1229,37 @@ mod tests {
             find_peaks(&[3.0, 1.0, 0.0, 0.0, 1.0, 3.0], &angles, 5, false),
             [0.0, 5.0]
         );
+    }
+
+    /// A plateau's midpoint stays in the search interval `[start, end)` wherever the
+    /// plateau sits, including when it wraps around a grid that does not start at 0.
+    #[test]
+    fn find_peaks_plateau_midpoint_stays_in_interval() {
+        let (start, step, len) = (-0.5, 1.0, 6);
+        let angles: Vec<f64> = (0..len).map(|i| start + step * i as f64).collect();
+        let end = start + step * len as f64;
+        for plateau_len in 1..=3 {
+            for first in 0..len {
+                let mut scores = vec![0.0; len];
+                for k in 0..plateau_len {
+                    scores[(first + k) % len] = 3.0;
+                }
+                let peaks = find_peaks(&scores, &angles, 1, true);
+                assert_eq!(peaks.len(), 1, "{scores:?}");
+                assert!(
+                    (start..end).contains(&peaks[0]),
+                    "{scores:?}: {} not in [{start}, {end})",
+                    peaks[0]
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn find_peaks_single_point() {
+        assert_eq!(find_peaks(&[2.0], &[0.5], 1, false), vec![0.5]);
+        // On the circle the only point is its own neighbour, so it is not higher.
+        assert!(find_peaks(&[2.0], &[0.5], 1, true).is_empty());
     }
 
     #[test]
