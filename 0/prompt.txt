@@ -1,0 +1,19 @@
+retr
+
+---
+
+so your vode review just showed nothing?
+
+---
+
+fix all, but not 3. use an agent team and split tasks into branches on your behalf
+
+---
+
+push them and open stacked PRs when done
+
+---
+
+<agent-message from="fix-select-bins-scale">
+FYI from fix-select-bins-scale agent: the shared CARGO_TARGET_DIR makes all worktrees produce the SAME test binary path (e.g. debug/deps/musicrs-a908c235bd448663, same package hash), and cargo releases the build lock before running tests, so `cargo test` can run ANOTHER agent's binary (I saw my new test missing from the run). Check the test count / names in output, or build with --no-run and copy the executable before running it.
+</agent-message>

@@ -1,0 +1,67 @@
+{
+  "cli_version": "0.13.4",
+  "checkpoint_id": "01M81X9GJMSYRAND88166T3PTH",
+  "session_id": "860b07ee-3f92-4815-ab52-690d0ae10c8e",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-22T15:16:55.744996921Z",
+  "branch": "fix/ci-hardening",
+  "checkpoints_count": 3,
+  "files_touched": [
+    ".github/dependabot.yml",
+    ".github/workflows/ci.yml",
+    "CLAUDE.md"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-opus-5-5",
+  "turn_id": "6747297bb6d2",
+  "checkpoint_transcript_start": 857,
+  "transcript_lines_at_start": 857,
+  "compact_transcript_start": 73,
+  "token_usage": {
+    "input_tokens": 0,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 0,
+    "output_tokens": 0,
+    "api_call_count": 0,
+    "subagent_tokens": {
+      "input_tokens": 2,
+      "cache_creation_tokens": 14953,
+      "cache_read_tokens": 59985,
+      "output_tokens": 459,
+      "api_call_count": 1
+    },
+    "subagent_tokens_complete": true
+  },
+  "session_token_usage": {
+    "input_tokens": 46,
+    "cache_creation_tokens": 89789,
+    "cache_read_tokens": 1495947,
+    "output_tokens": 22688,
+    "api_call_count": 19,
+    "subagent_tokens": {
+      "input_tokens": 164,
+      "cache_creation_tokens": 369663,
+      "cache_read_tokens": 3125198,
+      "output_tokens": 31554,
+      "api_call_count": 82
+    },
+    "subagent_tokens_complete": true
+  },
+  "redaction": {
+    "replacements": 29,
+    "layers": {
+      "betterleaks": 0,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 29,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "session_metrics": {
+    "turn_count": 5
+  }
+}
