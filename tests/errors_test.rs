@@ -237,6 +237,104 @@ fn ifb_music_spectrum_skips_silent_bins() {
     assert_eq!(only, with_silent);
 }
 
+/// The estimator's own fields are checked where they are used: the sample rate and
+/// antenna positions by every function that builds steering vectors.
+#[test]
+fn invalid_estimator_errors() {
+    let data = tone(1600);
+    let noise = DMatrix::identity(4, 3);
+    let check = |est: &MusicEstimator, expected: MusicError| {
+        assert_eq!(
+            est.estimate_doa_from_real(&data, 1, 1000.0),
+            Err(expected.clone())
+        );
+        let complex = data.map(|x| Complex::new(x, 0.0));
+        assert_eq!(est.estimate_doa(&complex, 1, 1000.0), Err(expected.clone()));
+        assert_eq!(
+            est.ifb_music_spectrum(&data, NFFT, 1, None).map(|_| ()),
+            Err(expected.clone())
+        );
+        assert_eq!(est.spectrum(&noise, 1000.0).map(|_| ()), Err(expected));
+    };
+    for sr in [0.0, -16000.0, f64::NAN, f64::INFINITY] {
+        let est = MusicEstimator {
+            sample_rate: sr,
+            ..MusicEstimator::default()
+        };
+        // NaN != NaN, so compare the error's text for it
+        if sr.is_nan() {
+            assert_eq!(
+                est.estimate_doa_from_real(&data, 1, 1000.0)
+                    .unwrap_err()
+                    .to_string(),
+                "sample rate must be finite and positive, got NaN Hz"
+            );
+        } else {
+            check(&est, MusicError::InvalidSampleRate(sr));
+        }
+    }
+    for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        let mut est = MusicEstimator::default();
+        est.antenna_positions[2][1] = bad;
+        check(&est, MusicError::InvalidAntennaPosition { index: 2 });
+    }
+    // A search interval wider than 2π visits directions twice; exactly 2π is fine
+    let wide = MusicEstimator {
+        search_interval: (0.0, 4.0 * PI),
+        angle_steps_num: 1440,
+        ..MusicEstimator::default()
+    };
+    check(
+        &wide,
+        MusicError::InvalidAngleGrid {
+            angle_steps_num: 1440,
+            search_interval: (0.0, 4.0 * PI),
+        },
+    );
+    let shifted = MusicEstimator {
+        search_interval: (-PI, PI),
+        ..MusicEstimator::default()
+    };
+    assert!(shifted.estimate_doa_from_real(&data, 1, 1000.0).is_ok());
+}
+
+/// The signal frequency must be finite and positive, for every function that takes one.
+#[test]
+fn invalid_frequency_errors() {
+    let est = MusicEstimator::default();
+    let data = tone(1600);
+    let complex = data.map(|x| Complex::new(x, 0.0));
+    for freq in [0.0, -1000.0, f64::INFINITY, f64::NEG_INFINITY] {
+        let expected = Err(MusicError::InvalidFrequency(freq));
+        assert_eq!(est.estimate_doa_from_real(&data, 1, freq), expected);
+        assert_eq!(est.estimate_doa(&complex, 1, freq), expected);
+        assert_eq!(
+            est.spectrum(&DMatrix::identity(4, 3), freq).map(|_| ()),
+            expected.map(|_| ())
+        );
+    }
+    assert!(matches!(
+        est.estimate_doa_from_real(&data, 1, f64::NAN),
+        Err(MusicError::InvalidFrequency(f)) if f.is_nan()
+    ));
+}
+
+/// IFB never uses the DC bin: it has no direction information.
+#[test]
+fn ifb_music_spectrum_ignores_dc_bin() {
+    let est = MusicEstimator::default();
+    let data = tone(1600).map(|x| x + 0.5);
+    assert_eq!(
+        est.ifb_music_spectrum(&data, NFFT, 1, Some(&[0]))
+            .map(|_| ()),
+        Err(MusicError::NoUsableBins)
+    );
+    assert_eq!(
+        est.ifb_music_spectrum(&data, NFFT, 1, Some(&[0, 10])),
+        est.ifb_music_spectrum(&data, NFFT, 1, Some(&[10]))
+    );
+}
+
 #[test]
 fn stft_errors() {
     assert_eq!(stft(&[0.0; 8], 0, 0), Err(MusicError::InvalidNfft));

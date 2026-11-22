@@ -32,15 +32,23 @@ pub enum MusicError {
     InvalidOverlap { no_overlap: usize, nfft: usize },
     /// The bin-selection threshold must be finite and non-negative.
     InvalidThreshold(f64),
-    /// None of the requested frequency bins exists (each must be in `1..=nfft / 2`
-    /// for the default selection, or below `nfft / 2 + 1`).
+    /// None of the requested frequency bins is usable: each must be in `1..=nfft / 2`
+    /// (the DC bin 0 has no direction information).
     NoUsableBins,
     /// The angle grid is unusable: `angle_steps_num` must be positive and the search
-    /// interval finite with `start < end`.
+    /// interval finite with `start < end`, spanning at most 2π (a wider one visits some
+    /// directions twice).
     InvalidAngleGrid {
         angle_steps_num: usize,
         search_interval: (f64, f64),
     },
+    /// The signal frequency must be finite and positive: at 0 Hz every direction scores
+    /// the same.
+    InvalidFrequency(f64),
+    /// The estimator's `sample_rate` must be finite and positive.
+    InvalidSampleRate(f64),
+    /// An antenna position (the antenna at `index`) is NaN or infinite.
+    InvalidAntennaPosition { index: usize },
 }
 
 impl fmt::Display for MusicError {
@@ -81,15 +89,27 @@ impl fmt::Display for MusicError {
             Self::InvalidThreshold(t) => {
                 write!(f, "threshold must be finite and non-negative, got {t} dB")
             }
-            Self::NoUsableBins => write!(f, "none of the requested frequency bins exists"),
+            Self::NoUsableBins => write!(
+                f,
+                "none of the requested frequency bins is usable (each must be in 1..=nfft/2)"
+            ),
             Self::InvalidAngleGrid {
                 angle_steps_num,
                 search_interval: (start, end),
             } => write!(
                 f,
                 "invalid angle grid: {angle_steps_num} steps over ({start}, {end}); \
-                 need at least one step and a finite interval with start < end"
+                 need at least one step and a finite interval with start < end spanning at most 2π"
             ),
+            Self::InvalidFrequency(freq) => {
+                write!(f, "frequency must be finite and positive, got {freq} Hz")
+            }
+            Self::InvalidSampleRate(sr) => {
+                write!(f, "sample rate must be finite and positive, got {sr} Hz")
+            }
+            Self::InvalidAntennaPosition { index } => {
+                write!(f, "antenna {index} has a NaN or infinite position")
+            }
         }
     }
 }
