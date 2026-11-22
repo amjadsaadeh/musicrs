@@ -46,6 +46,7 @@ tests/
 - `MusicEstimator` — main struct; configure antenna positions, angle search range/step, sample rate, and number of sources
 - `MusicEstimator::estimate_doa_from_real()` — real-data entry point (analytic signal per channel, then `estimate_doa`), like pyMUSIC's `getSourceAngles`
 - `MusicEstimator::ifb_music_spectrum()` — wideband variant; bin frequencies use the estimator's `sample_rate`, so tones above Nyquist cannot be recovered
+- `select_bins_by_energy()` — picks the IFB bins within N dB of the strongest; with `bins = None` noise-only bins dominate the geometric mean
 - `analytic_signal()` — converts real signal to complex via Hilbert transform (FFT-based)
 - `stft()` — Short-Time Fourier Transform with configurable window and overlap
 
@@ -81,6 +82,8 @@ Test data covers:
 - Array: Kinect 4-mic geometry
 
 ## Workflow
+
+- Before implementing a non-trivial change, propose a plan and get it approved first. While planning, ask clarifying questions about anything ambiguous (scope, API shape, defaults, test data) rather than guessing.
 
 - Make changes on a branch, never directly on `main`:
   - `feat/<feature-name>` for new features
