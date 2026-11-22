@@ -315,8 +315,8 @@ fn one_point_grid() {
     assert_eq!(est.estimate_doa_from_real(&data, 1, 1000.0), Ok(vec![0.0]));
 }
 
-/// Zero sources have nothing to find and return no angles. An empty search grid and
-/// frequency 0 (every steering vector is the same, so the spectrum is flat) are errors.
+/// Zero sources, an empty search grid and frequency 0 (every steering vector is the
+/// same, so the spectrum is flat) are errors.
 #[test]
 fn degenerate_configurations_find_nothing() {
     let est = MusicEstimator::default();
@@ -329,7 +329,10 @@ fn degenerate_configurations_find_nothing() {
         no_grid.estimate_doa_from_real(&data, 1, 1000.0),
         Err(MusicError::InvalidAngleGrid { .. })
     ));
-    assert_eq!(est.estimate_doa_from_real(&data, 0, 1000.0), Ok(vec![]));
+    assert_eq!(
+        est.estimate_doa_from_real(&data, 0, 1000.0),
+        Err(MusicError::NoSources)
+    );
     assert_eq!(
         est.estimate_doa_from_real(&data, 1, 0.0),
         Err(MusicError::InvalidFrequency(0.0))

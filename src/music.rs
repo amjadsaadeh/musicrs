@@ -434,14 +434,18 @@ impl MusicEstimator {
         }
     }
 
+    /// Checks that `0 < n_sources < n_antennas`. Zero sources would make the noise
+    /// subspace the whole space and the spectrum meaningless.
     fn check_sources(&self, n_sources: usize) -> Result<()> {
-        if n_sources < self.n_antennas() {
-            Ok(())
-        } else {
+        if n_sources >= self.n_antennas() {
             Err(MusicError::TooManySources {
                 n_sources,
                 n_antennas: self.n_antennas(),
             })
+        } else if n_sources == 0 {
+            Err(MusicError::NoSources)
+        } else {
+            Ok(())
         }
     }
 
@@ -507,15 +511,16 @@ impl MusicEstimator {
     ///
     /// # Arguments
     /// * `cov`       – Hermitian covariance matrix (n_antennas × n_antennas).
-    /// * `n_sources` – Number of signal sources (must be < n_antennas).
+    /// * `n_sources` – Number of signal sources (must be in `1..n_antennas`).
     ///
     /// `cov` is assumed to be Hermitian, as every covariance matrix is: only its lower
     /// triangle (diagonal included) is read.
     ///
     /// # Errors
     /// [`MusicError::CovarianceShape`] if `cov` is not n_antennas × n_antennas,
-    /// [`MusicError::NonFiniteData`] if it contains NaN or infinity, and
-    /// [`MusicError::TooManySources`] if `n_sources >= n_antennas`.
+    /// [`MusicError::NonFiniteData`] if it contains NaN or infinity,
+    /// [`MusicError::TooManySources`] if `n_sources >= n_antennas`, and
+    /// [`MusicError::NoSources`] if `n_sources` is 0.
     pub fn noise_subspace(&self, cov: &CMatrix, n_sources: usize) -> Result<CMatrix> {
         let n = self.n_antennas();
         if cov.shape() != (n, n) {
@@ -596,7 +601,8 @@ impl MusicEstimator {
     /// - [`MusicError::RowCountMismatch`] if `data` does not have one row per antenna.
     /// - [`MusicError::EmptyData`] if it has no samples, [`MusicError::NonFiniteData`]
     ///   if it contains NaN or infinity, [`MusicError::SilentData`] if it is all zeros.
-    /// - [`MusicError::TooManySources`] if `n_sources >= n_antennas`.
+    /// - [`MusicError::TooManySources`] if `n_sources >= n_antennas`, [`MusicError::NoSources`]
+    ///   if it is 0.
     /// - [`MusicError::InvalidFrequency`] unless `frequency` is finite and positive.
     /// - [`MusicError::InvalidAngleGrid`], [`MusicError::InvalidSampleRate`] or
     ///   [`MusicError::InvalidAntennaPosition`] for an unusable estimator (see [`new`](Self::new)).
@@ -727,7 +733,8 @@ impl MusicEstimator {
     ///   [`MusicError::NonFiniteData`] for unusable data, and
     ///   [`MusicError::DataShorterThanWindow`] if it has no complete STFT window.
     /// - [`MusicError::InvalidNfft`] if `nfft` is 0.
-    /// - [`MusicError::TooManySources`] if `n_sources >= n_antennas`.
+    /// - [`MusicError::TooManySources`] if `n_sources >= n_antennas`, [`MusicError::NoSources`]
+    ///   if it is 0.
     /// - [`MusicError::NoUsableBins`] if none of the bins is in `1..=nfft / 2` (for `None`:
     ///   `nfft` is 1).
     /// - [`MusicError::SilentData`] if no usable bin has power.

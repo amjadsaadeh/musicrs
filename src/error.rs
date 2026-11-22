@@ -26,6 +26,8 @@ pub enum MusicError {
     /// `n_sources` must be less than the number of antennas, so that a noise subspace
     /// is left.
     TooManySources { n_sources: usize, n_antennas: usize },
+    /// `n_sources` must be at least 1.
+    NoSources,
     /// The STFT window size `nfft` is 0.
     InvalidNfft,
     /// The STFT overlap must be less than the window size.
@@ -81,6 +83,7 @@ impl fmt::Display for MusicError {
                 "{n_sources} sources requested, but at most {} fit {n_antennas} antennas",
                 n_antennas.saturating_sub(1)
             ),
+            Self::NoSources => write!(f, "n_sources must be at least 1"),
             Self::InvalidNfft => write!(f, "nfft must be at least 1"),
             Self::InvalidOverlap { no_overlap, nfft } => write!(
                 f,

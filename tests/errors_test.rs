@@ -53,6 +53,7 @@ fn estimate_doa_from_real_errors() {
         Err(MusicError::SilentData)
     );
     assert_eq!(doa(&tone(1000), 4), Err(TOO_MANY));
+    assert_eq!(doa(&tone(1000), 0), Err(MusicError::NoSources));
 }
 
 #[test]
@@ -98,6 +99,10 @@ fn noise_subspace_and_spectrum_errors() {
     assert_eq!(
         est.noise_subspace(&DMatrix::identity(4, 4), 4),
         Err(TOO_MANY)
+    );
+    assert_eq!(
+        est.noise_subspace(&DMatrix::identity(4, 4), 0),
+        Err(MusicError::NoSources)
     );
     assert_eq!(
         est.spectrum(&DMatrix::identity(3, 2), 1000.0),
@@ -196,6 +201,7 @@ fn ifb_music_spectrum_errors() {
         Err(MusicError::NonFiniteData)
     );
     assert_eq!(ifb(&data, NFFT, 4, None), Err(TOO_MANY));
+    assert_eq!(ifb(&data, NFFT, 0, None), Err(MusicError::NoSources));
     assert_eq!(ifb(&data, 0, 1, None), Err(MusicError::InvalidNfft));
     assert_eq!(
         ifb(&tone(NFFT - 1), NFFT, 1, None),
@@ -343,6 +349,10 @@ fn estimate_doa_parameter_errors() {
         MusicEstimator::default().estimate_doa(&complex, 4, 1000.0),
         Err(TOO_MANY)
     );
+    assert_eq!(
+        MusicEstimator::default().estimate_doa(&complex, 0, 1000.0),
+        Err(MusicError::NoSources)
+    );
     let no_grid = MusicEstimator {
         angle_steps_num: 0,
         ..MusicEstimator::default()
@@ -428,6 +438,7 @@ fn every_error_message() {
             TOO_MANY,
             "4 sources requested, but at most 3 fit 4 antennas",
         ),
+        (MusicError::NoSources, "n_sources must be at least 1"),
         (MusicError::InvalidNfft, "nfft must be at least 1"),
         (
             MusicError::InvalidOverlap {
