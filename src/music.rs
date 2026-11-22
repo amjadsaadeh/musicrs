@@ -228,6 +228,9 @@ pub fn select_bins_by_energy(
             samples: data.ncols(),
         });
     }
+    // Without this, the power sums underflow to 0 for very quiet data (SilentData) and
+    // overflow to infinity for very loud data (every bin selected).
+    let data = &normalised_real(data);
     let mut power = vec![0.0; nfft / 2 + 1];
     for m in 0..data.nrows() {
         let row: Vec<f64> = data.row(m).iter().copied().collect();
@@ -1187,6 +1190,38 @@ mod tests {
                 samples: 63
             })
         );
+    }
+
+    #[test]
+    fn select_bins_by_energy_does_not_depend_on_scale() {
+        // A 1 kHz tone at 16 kHz with nfft = 160 is bin 10. Unnormalised, the power sums
+        // underflowed at 1e-170 (SilentData) and overflowed at 1e300 (all 80 bins).
+        let tone = DMatrix::from_fn(4, 1600, |m, t| {
+            (2.0 * PI * 1000.0 * t as f64 / 16000.0 + m as f64).cos()
+        });
+        for scale in [1e-300, 1e-200, 1e-170, 1.0, 1e150, 1e300] {
+            assert_eq!(
+                select_bins_by_energy(&(&tone * scale), 160, 20.0),
+                Ok(vec![10]),
+                "scale {scale:e}"
+            );
+        }
+        let data = two_tones_with_dc();
+        for scale in [1e-200, 1e200] {
+            assert_eq!(
+                select_bins_by_energy(&(&data * scale), 64, 20.0),
+                Ok(vec![5, 20]),
+                "scale {scale:e}"
+            );
+        }
+        // Silence stays silence at any scale
+        for scale in [1e-300, 1e300] {
+            assert_eq!(
+                select_bins_by_energy(&DMatrix::from_element(4, 640, 0.5 * scale), 64, 20.0),
+                Err(MusicError::SilentData),
+                "scale {scale:e}"
+            );
+        }
     }
 
     #[test]
