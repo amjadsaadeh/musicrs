@@ -460,12 +460,18 @@ impl MusicEstimator {
     /// * `n_sources` – Number of signal sources (must be < n_antennas).
     ///
     /// # Errors
-    /// [`MusicError::RowCountMismatch`] if `cov` is not n_antennas × n_antennas,
+    /// [`MusicError::CovarianceShape`] if `cov` is not n_antennas × n_antennas,
     /// [`MusicError::NonFiniteData`] if it contains NaN or infinity, and
     /// [`MusicError::TooManySources`] if `n_sources >= n_antennas`.
     pub fn noise_subspace(&self, cov: &CMatrix, n_sources: usize) -> Result<CMatrix> {
-        self.check_rows(cov.nrows())?;
-        self.check_rows(cov.ncols())?;
+        let n = self.n_antennas();
+        if cov.shape() != (n, n) {
+            return Err(MusicError::CovarianceShape {
+                n_antennas: n,
+                rows: cov.nrows(),
+                cols: cov.ncols(),
+            });
+        }
         self.check_sources(n_sources)?;
         if !cov.iter().all(|c| c.re.is_finite() && c.im.is_finite()) {
             return Err(MusicError::NonFiniteData);

@@ -76,19 +76,21 @@ fn estimate_doa_errors() {
 #[test]
 fn noise_subspace_and_spectrum_errors() {
     let est = MusicEstimator::default();
+    for (rows, cols) in [(3, 3), (4, 3), (3, 4)] {
+        assert_eq!(
+            est.noise_subspace(&DMatrix::identity(rows, cols), 1),
+            Err(MusicError::CovarianceShape {
+                n_antennas: 4,
+                rows,
+                cols
+            })
+        );
+    }
     assert_eq!(
-        est.noise_subspace(&DMatrix::identity(3, 3), 1),
-        Err(MusicError::RowCountMismatch {
-            expected: 4,
-            got: 3
-        })
-    );
-    assert_eq!(
-        est.noise_subspace(&DMatrix::identity(4, 3), 1),
-        Err(MusicError::RowCountMismatch {
-            expected: 4,
-            got: 3
-        })
+        est.noise_subspace(&DMatrix::identity(4, 3), 1)
+            .unwrap_err()
+            .to_string(),
+        "covariance matrix is 4 × 3, expected 4 × 4 (one row and column per antenna)"
     );
     let mut nan = DMatrix::identity(4, 4);
     nan[(0, 1)] = Complex::new(f64::NAN, 0.0);

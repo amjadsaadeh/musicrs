@@ -5,9 +5,15 @@ use std::fmt;
 /// Why a musicrs function could not produce a result.
 #[derive(Debug, Clone, PartialEq)]
 pub enum MusicError {
-    /// The data (or noise subspace, or covariance matrix) has the wrong number of rows:
-    /// one per antenna is expected.
+    /// The data (or noise subspace) has the wrong number of rows: one per antenna is
+    /// expected.
     RowCountMismatch { expected: usize, got: usize },
+    /// The covariance matrix is not `n_antennas × n_antennas`.
+    CovarianceShape {
+        n_antennas: usize,
+        rows: usize,
+        cols: usize,
+    },
     /// The data has no rows or no samples.
     EmptyData,
     /// The data is shorter than one STFT window, so it has no complete window.
@@ -43,6 +49,15 @@ impl fmt::Display for MusicError {
             Self::RowCountMismatch { expected, got } => {
                 write!(f, "expected {expected} rows (one per antenna), got {got}")
             }
+            Self::CovarianceShape {
+                n_antennas,
+                rows,
+                cols,
+            } => write!(
+                f,
+                "covariance matrix is {rows} × {cols}, expected {n_antennas} × {n_antennas} \
+                 (one row and column per antenna)"
+            ),
             Self::EmptyData => write!(f, "data has no samples"),
             Self::DataShorterThanWindow { nfft, samples } => write!(
                 f,
