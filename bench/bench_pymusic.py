@@ -77,13 +77,13 @@ with open(out_path, "w") as out:
     for name, run, durations, samples in WORKLOADS:
         for duration in durations:
             data = read_wav_4ch(os.path.join(DATA_DIR, f"single-source_{FREQ}Hz_40deg_{duration}s.wav"))
-            samples = max(5, round(samples * SCALE))
+            n = max(5, round(samples * SCALE))
             for _ in range(WARMUP):
                 run(data)
-            for i in range(samples):
+            for i in range(n):
                 t0 = time.perf_counter_ns()
                 run(data)
                 dt = time.perf_counter_ns() - t0
                 out.write(f"pymusic,{name},{duration},{i},{dt / 1e9!r}\n")
             out.flush()
-            print(f"pymusic {name} {duration}s: {samples} samples", file=sys.stderr)
+            print(f"pymusic {name} {duration}s: {n} samples", file=sys.stderr)
