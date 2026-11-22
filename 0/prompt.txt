@@ -1,0 +1,251 @@
+retr
+
+---
+
+so your vode review just showed nothing?
+
+---
+
+fix all, but not 3. use an agent team and split tasks into branches on your behalf
+
+---
+
+push them and open stacked PRs when done
+
+---
+
+<agent-message from="fix-select-bins-scale">
+FYI from fix-select-bins-scale agent: the shared CARGO_TARGET_DIR makes all worktrees produce the SAME test binary path (e.g. debug/deps/musicrs-a908c235bd448663, same package hash), and cargo releases the build lock before running tests, so `cargo test` can run ANOTHER agent's binary (I saw my new test missing from the run). Check the test count / names in output, or build with --no-run and copy the executable before running it.
+</agent-message>
+
+---
+
+<task-notification>
+<task-id>af87066f575de68f7</task-id>
+<tool-use-id>repl_c81bc69d-bd55-43a4-bc0f-c4a9d1f0d8cc</tool-use-id>
+<output-file>/tmp/claude-1000/-home-orchid-projects-musicrs/860b07ee-3f92-4815-ab52-690d0ae10c8e/tasks/af87066f575de68f7.output</output-file>
+<status>completed</status>
+<summary>Agent "reject zero sources" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once. One or more messages sent to this agent arrived after this run's last step, too late for the result below. The agent is being resumed with them and will notify again. Wait for that notification before resending.</note>
+<result>Asking for zero sources now returns the new `MusicError::NoSources` error from every function that takes `n_sources`. All three checks pass on the branch.
+
+**Branch:** `fix/zero-sources`, created from 6e41e8b. Nothing was pushed or merged.
+
+**Commit:** `342f2ee` Reject zero sources with MusicError::NoSources
+
+**Results:**
+- `cargo fmt --check`: exit 0, no diffs.
+- `cargo clippy --all-targets -- -D warnings`: finished with no warnings.
+- `cargo test -- --include-ignored`: every suite passed, 0 failed and 0 ignored (42 unit tests, 17 in `errors_test`, and the rest of the integration tests and doc-tests).
+
+**What changed:**
+- **`/home/orchid/projects/musicrs/.claude/worktrees/agent-af87066f575de68f7/src/error.rs`:** added `NoSources` with the doc "`n_sources` must be at least 1" and the message "n_sources must be at least 1".
+- **`/home/orchid/projects/musicrs/.claude/worktrees/agent-af87066f575de68f7/src/music.rs`:** `check_sources` now returns `NoSources` for 0. This covers `estimate_doa`, `estimate_doa_from_real`, `ifb_music_spectrum` and `noise_subspace`. Their "# Errors" docs and the `n_sources` argument doc now mention it.
+- **`/home/orchid/projects/musicrs/.claude/worktrees/agent-af87066f575de68f7/tests/errors_test.rs`:** added a zero-sources check for each of the four functions, next to the existing too-many-sources checks, plus a line in the test that checks every error message.
+- **`/home/orchid/projects/musicrs/.claude/worktrees/agent-af87066f575de68f7/tests/synthetic_test.rs`:** the test `degenerate_configurations_find_nothing` expected `Ok(vec![])` for zero sources. It now expects `Err(MusicError::NoSources)`, and its doc comment says so.
+- **`/home/orchid/projects/musicrs/.claude/worktrees/agent-af87066f575de68f7/CLAUDE.md`:** the `MusicError` description now says "too many or zero sources".
+
+**Decision:** `check_sources` checks for too many sources before checking for zero. An estimator with no antennas and `n_sources = 0` therefore still gets `TooManySources`, so the existing `no_antennas` test and its message are unchanged. The README only refers to `MusicError` in general terms, so I didn't edit it.</result>
+<usage><subagent_tokens>57352</subagent_tokens><tool_uses>46</tool_uses><duration_ms>1265192</duration_ms></usage>
+<worktree><worktreePath>/home/orchid/projects/musicrs/.claude/worktrees/agent-af87066f575de68f7</worktreePath><worktreeBranch>worktree-agent-af87066f575de68f7</worktreeBranch></worktree>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>ac989696aebf1b3c1</task-id>
+<tool-use-id>repl_92b9b5da-114c-43b2-90f7-4809d8b3a3f0</tool-use-id>
+<output-file>/tmp/claude-1000/-home-orchid-projects-musicrs/860b07ee-3f92-4815-ab52-690d0ae10c8e/tasks/ac989696aebf1b3c1.output</output-file>
+<status>completed</status>
+<summary>Agent "stft huge nfft" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>I fixed `stft()`: when the data is shorter than `nfft` it now returns `MusicError::DataShorterThanWindow { nfft, samples }` before planning the FFT or allocating any bins. `stft(&amp;[0.0; 4], 1 &lt;&lt; 40, 0)` returns that error at once instead of aborting the process, and memory stays bounded by the input size. All three checks pass, re-run in my own target dir as you asked.
+
+**Branch:** `fix/stft-huge-nfft`, based on 6e41e8b. Nothing pushed.
+
+**Commit:** f623f5e "Reject data shorter than nfft in stft before planning the FFT"
+
+**Changes:**
+- **`src/stft.rs`:**
+  - The new check runs after the existing `InvalidNfft` and `InvalidOverlap` checks, so parameter errors still come first.
+  - The doc comment's "nfft/2+1 empty bins" line is replaced by the new `# Errors` contract.
+  - The old branch that counted zero windows for short data is gone, since that case can no longer reach it.
+  - New unit test `stft_rejects_data_shorter_than_window` covers the `1 &lt;&lt; 40` case, empty input, and that `InvalidOverlap` still wins when both errors apply.
+- **`tests/errors_test.rs`:** `stft_errors` now also checks the new error with `nfft = 1 &lt;&lt; 40`.
+- **Callers in `src/music.rs`:** unchanged. Both already return `DataShorterThanWindow` when the data has fewer than `nfft` columns, before they call `stft`, so they behave as before.
+- **Docs:** README and CLAUDE.md say nothing about the old behaviour, so they needed no change. No existing test or doctest relied on the empty-bins result.
+
+**Results** (with `CARGO_TARGET_DIR=.../scratchpad/target-fix-stft-huge-nfft CARGO_BUILD_JOBS=1`):
+- `cargo fmt --check`: exit 0.
+- `cargo clippy --all-targets -- -D warnings`: finished with no warnings.
+- `cargo test -- --include-ignored`: every suite passed with 0 failures (unit 43, then 14, 17, 9, 5, 3, 6, 11, and doctests 7). Both new tests appear by name: `stft::tests::stft_rejects_data_shorter_than_window ... ok` and `stft_errors ... ok`.
+
+My earlier run in the shared target dir failed its doctests because the library file they needed had been replaced by another agent's build. The run above, in my own dir, supersedes it.</result>
+<usage><subagent_tokens>49633</subagent_tokens><tool_uses>46</tool_uses><duration_ms>2870124</duration_ms></usage>
+<worktree><worktreePath>/home/orchid/projects/musicrs/.claude/worktrees/agent-ac989696aebf1b3c1</worktreePath><worktreeBranch>worktree-agent-ac989696aebf1b3c1</worktreeBranch></worktree>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>a8eb319e8422072a2</task-id>
+<tool-use-id>repl_7099f16a-e036-4b2a-a340-af2f62c23206</tool-use-id>
+<output-file>/tmp/claude-1000/-home-orchid-projects-musicrs/860b07ee-3f92-4815-ab52-690d0ae10c8e/tasks/a8eb319e8422072a2.output</output-file>
+<status>completed</status>
+<summary>Agent "ifb memory and dup bins" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>Both fixes are committed as two separate commits on branch `fix/ifb-memory` (from 6e41e8b), and fmt, clippy and the full test suite pass on the final commit. Nothing was pushed, merged or opened as a PR.
+
+**Commits**
+- `a11a2b0` Build IFB cross-spectral matrices one bin at a time
+- `d19da0c` Count each IFB bin once in the geometric mean
+
+**What changed**
+- **(a) Memory:** `ifb_music_spectrum` no longer builds the `covs` Vec. Each bin's covariance is now computed inside the per-bin loop, so only one n_mics x n_mics matrix exists at a time. The arithmetic is the same and `strongest` is still computed before the loop. The golden, ifb and broadband tests all pass, which confirms the spectra are bit-for-bit identical.
+- **(b) Duplicate bins:** the active bins are now sorted and deduplicated before the loop, and the doc on the `bins` argument says each bin counts once whatever the order. The new test `ifb_duplicate_and_reordered_bins_are_ignored` in `tests/ifb_test.rs` sums the 1400 Hz @ 40° and 3600 Hz @ 120° recordings and uses nfft 160, so the bins are 14 and 36. It checks with exact `assert_eq!` that `[36,14,14,36,36]` and `[14,36]` give the same spectrum. I removed the dedup temporarily to confirm the test fails without it, then put it back. The `ifb_test.rs` line in `CLAUDE.md` now mentions this test.
+
+**Results on the final commit (`d19da0c`), with your own target dir and `CARGO_BUILD_JOBS=1`**
+- `cargo fmt --check`: OK
+- `cargo clippy --all-targets -- -D warnings`: clean
+- `cargo test -- --include-ignored`: all passed
+  - lib 42, broadband 14, errors 17, golden 9, ifb 6, integration 3, noisy 6, synthetic 11, doctests 7
+  - the new test appears by name and passes
+
+**Things to know**
+- My first full run used the shared target dir and reported a failure in `select_bins_by_energy_does_not_depend_on_scale`. That test does not exist on my branch, so it was another agent's binary, which is the problem you described.
+- Commit `a11a2b0` on its own was only tested with the shared dir (all passed then). It is a pure refactor, and its code is included in the `d19da0c` tree that passed the clean run.</result>
+<usage><subagent_tokens>83525</subagent_tokens><tool_uses>144</tool_uses><duration_ms>3044847</duration_ms></usage>
+<worktree><worktreePath>/home/orchid/projects/musicrs/.claude/worktrees/agent-a8eb319e8422072a2</worktreePath><worktreeBranch>worktree-agent-a8eb319e8422072a2</worktreeBranch></worktree>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>af87066f575de68f7</task-id>
+<output-file>/tmp/claude-1000/-home-orchid-projects-musicrs/860b07ee-3f92-4815-ab52-690d0ae10c8e/tasks/af87066f575de68f7.output</output-file>
+<status>completed</status>
+<summary>Agent "reject zero sources" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>I re-ran everything with my own target dir (`target-fix-zero-sources`) and `CARGO_BUILD_JOBS=1`, and all three checks pass. The binaries ran from that dir, not the shared one.
+
+**Branch:** `fix/zero-sources`, created from 6e41e8b. Nothing was pushed or merged.
+
+**Commit:** `342f2ee` Reject zero sources with MusicError::NoSources
+
+**Results:**
+- `cargo fmt --check`: exit 0.
+- `cargo clippy --all-targets -- -D warnings`: exit 0, no warnings.
+- `cargo test -- --include-ignored`: exit 0, 0 failed and 0 ignored. That is 42 unit tests, 14 broadband, 17 errors, 9 golden, 5 ifb, 3 integration, 6 noisy, 11 synthetic and 7 doc-tests.
+
+**Tests by name:** I didn't add new test functions. The zero-sources checks are extra assertions inside existing tests, and all of these appear as `ok` in the output:
+- In `errors_test`: `estimate_doa_from_real_errors`, `estimate_doa_parameter_errors`, `noise_subspace_and_spectrum_errors`, `ifb_music_spectrum_errors` and `every_error_message` (which checks the message "n_sources must be at least 1").
+- In `synthetic_test`: `degenerate_configurations_find_nothing`, which now expects `NoSources` instead of `Ok(vec![])`.
+
+**What changed:**
+- `src/error.rs`: added `NoSources` with its doc comment and message.
+- `src/music.rs`: `check_sources` now rejects 0, which covers `estimate_doa`, `estimate_doa_from_real`, `ifb_music_spectrum` and `noise_subspace`. Their "# Errors" docs and the `n_sources` argument doc mention it.
+- `CLAUDE.md`: the `MusicError` description now says "too many or zero sources".
+
+**Decisions:**
+- `check_sources` checks for too many sources before checking for zero. An estimator with no antennas and `n_sources = 0` still gets `TooManySources`, so the existing `no_antennas` test is unchanged.
+- I didn't edit the README, because it only mentions `MusicError` in general terms.
+- I kept the name `degenerate_configurations_find_nothing` to keep the diff small, though every case in it is now an error.
+
+The full test log is `/tmp/claude-1000/-home-orchid-projects-musicrs/860b07ee-3f92-4815-ab52-690d0ae10c8e/scratchpad/zero-sources-test.log`.</result>
+<usage><subagent_tokens>64150</subagent_tokens><tool_uses>62</tool_uses><duration_ms>3047103</duration_ms></usage>
+<worktree><worktreePath>/home/orchid/projects/musicrs/.claude/worktrees/agent-af87066f575de68f7</worktreePath><worktreeBranch>worktree-agent-af87066f575de68f7</worktreeBranch></worktree>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>ab47cda2c4b432b09</task-id>
+<tool-use-id>repl_fe895f81-61e0-4235-a420-e5a25adfd9e4</tool-use-id>
+<output-file>/tmp/claude-1000/-home-orchid-projects-musicrs/860b07ee-3f92-4815-ab52-690d0ae10c8e/tasks/ab47cda2c4b432b09.output</output-file>
+<status>completed</status>
+<summary>Agent "harden ci workflow" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>I've hardened CI on branch `fix/ci-hardening`, based on 6e41e8b, in two commits. Nothing was pushed and no Rust source changed. fmt, clippy and the full test suite all pass, run again in my own target dir as you asked.
+
+**Commits**
+- `23e3ee6` Harden CI: pin actions, least privilege, audit job
+- `4ec8917` Bump crossbeam-epoch to 0.9.21 for RUSTSEC-2026-0204
+
+**What changed** (`.github/workflows/ci.yml`, new `.github/dependabot.yml`, one line in `CLAUDE.md`)
+- **Pinned actions:** every action is pinned to a full commit SHA, each with a `# vX.Y.Z` comment. I resolved each SHA with `gh api`; all the release tags pointed straight at commits, so there were no annotated tags to dereference.
+
+| Action | Pinned to |
+|---|---|
+| actions/checkout | v7.0.1 `3d3c42e5…` |
+| Swatinem/rust-cache | v2.9.3 `d1527c8f…` |
+| taiki-e/install-action | v2.90.8 `fe3acb53…` |
+| EnricoMi/publish-unit-test-result-action | v2.26.0 `da5b7be6…` |
+| actions/upload-artifact | v7.0.2 `cf430e03…` |
+| actions/download-artifact | v8.0.2 `90008276…` |
+| dtolnay/rust-toolchain | master `df2a88e9…` (still `toolchain: stable`) |
+
+- **Permissions:** the top level has only `contents: read`. The test job now uploads `junit.xml` as an artifact. A new `publish-test-results` job (`needs: test`, `if: always()`) downloads it and publishes it. That job runs no repository code and is the only one with `checks: write` and `pull-requests: write`. Checkout now uses `persist-credentials: false`; you didn't ask for this, but it stops the token being left in the checkout.
+- **`--locked`** is on `cargo clippy`, `cargo build` and `cargo nextest run`.
+- **Audit job:** installs cargo-audit with taiki-e/install-action and runs `cargo audit`. I chose this over cargo-deny so no config file is needed.
+- **Triggers:** CI now also runs on push to `main`. A concurrency group `${{ github.workflow }}-${{ github.ref }}` cancels superseded runs of the same ref.
+- **Dependabot:** weekly updates for `github-actions` and `cargo`.
+- **`CLAUDE.md`:** the Commands block now has a `cargo audit` line.
+
+**Audit findings** (cargo-audit 0.23.0, run locally)
+- **Vulnerability:** crossbeam-epoch 0.9.18 (RUSTSEC-2026-0204), pulled in through faer → rayon. This would have made the new audit job fail. Commit `4ec8917` fixes it with a `Cargo.lock`-only `cargo update -p crossbeam-epoch` to 0.9.21. Drop that commit if you'd rather not touch the lockfile here.
+- **Two warnings, which don't fail the job:**
+  - paste 1.0.15 is unmaintained (RUSTSEC-2024-0436) and has no fix available.
+  - rand 0.8.5 is flagged unsound (RUSTSEC-2026-0097); 0.8.6 is patched. I left it alone.
+- After the bump, `cargo audit` exits 0.
+
+**Validation**
+- Both YAML files parse with `python3` `yaml.safe_load`. actionlint isn't installed, so it wasn't run.
+- With `CARGO_TARGET_DIR=…/scratchpad/target-fix-ci-hardening CARGO_BUILD_JOBS=1`:
+  - `cargo fmt --check`: exit 0.
+  - `cargo clippy --locked --all-targets -- -D warnings`: exit 0, no warnings.
+  - `cargo test --locked -- --include-ignored`: exit 0, 114 passed and 0 failed across the lib tests, 8 integration test files and the doctests. The test binaries ran from my own target dir.
+- I added no regression tests, since there is no behaviour change in Rust code.
+
+**Not done or known limits**
+- On pull requests from forks GitHub gives a read-only token, so the publish job still can't comment there. This was already true before; fixing it would need a `workflow_run` setup.
+- The new CI jobs have not run on GitHub yet, because nothing was pushed.</result>
+<usage><subagent_tokens>50892</subagent_tokens><tool_uses>71</tool_uses><duration_ms>3058345</duration_ms></usage>
+<worktree><worktreePath>/home/orchid/projects/musicrs/.claude/worktrees/agent-ab47cda2c4b432b09</worktreePath><worktreeBranch>worktree-agent-ab47cda2c4b432b09</worktreeBranch></worktree>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>a7f641938f1144313</task-id>
+<tool-use-id>repl_7ab88a57-17c6-4266-aeba-5357ebed0bd2</tool-use-id>
+<output-file>/tmp/claude-1000/-home-orchid-projects-musicrs/860b07ee-3f92-4815-ab52-690d0ae10c8e/tasks/a7f641938f1144313.output</output-file>
+<status>completed</status>
+<summary>Agent "select bins scale" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>`select_bins_by_energy` now picks the same bins at any data scale. A 1 kHz tone at 1e-170 no longer returns `Err(SilentData)`, and at 1e300 it selects bin 10 instead of all 80 bins.
+
+**Branch:** `fix/select-bins-scale`, based on 6e41e8b.
+
+**Commit:** `69f7112` Normalise the data in select_bins_by_energy
+
+**Change** (in `/home/orchid/projects/musicrs/.claude/worktrees/agent-a7f641938f1144313/src/music.rs`):
+- **Fix:** I added `let data = &amp;normalised_real(data);` after `check_real_samples` and the `DataShorterThanWindow` check, the same normalisation `ifb_music_spectrum` uses. It divides by a power of two, which is exact, so results at normal scales don't change.
+- **Regression test:** the new unit test is `select_bins_by_energy_does_not_depend_on_scale`.
+  - The 4-channel 1 kHz tone (nfft 160, 20 dB) gives `[10]` at 1e-300, 1e-200, 1e-170, 1, 1e150 and 1e300.
+  - The existing two-tones-plus-DC data gives `[5, 20]` at 1e-200 and 1e200.
+  - DC-only data still returns `SilentData` at 1e-300 and 1e300.
+- **Checked against the old code:** with the fix removed, the new test fails (`scale 1e-300: Err(SilentData)`), and the existing silence test (zeros and DC-only) still passes.
+- **Docs:** I left the doc comment, README and CLAUDE.md alone, since no public behaviour they describe changed.
+
+**Results**, re-run after your correction with `CARGO_TARGET_DIR=.../scratchpad/target-fix-select-bins-scale CARGO_BUILD_JOBS=1`:
+- **`cargo fmt --check`:** passes.
+- **`cargo clippy --all-targets -- -D warnings`:** finished with no warnings.
+- **`cargo test -- --include-ignored`:** exit code 0, no failures.
+  - lib: 43 passed, and `select_bins_by_energy_does_not_depend_on_scale` appears by name in the output.
+  - integration test files: broadband 14, errors 17, golden 9, ifb 5, integration 3, noisy 6, synthetic 11.
+  - doc-tests: 7.
+
+**Shared target dir:** before your correction I had already found the binary-overwrite problem and sent you a note about it. I only counted the results from my own target dir. Nothing was pushed or merged, and I touched no other branch.</result>
+<usage><subagent_tokens>58094</subagent_tokens><tool_uses>69</tool_uses><duration_ms>3066925</duration_ms></usage>
+<worktree><worktreePath>/home/orchid/projects/musicrs/.claude/worktrees/agent-a7f641938f1144313</worktreePath><worktreeBranch>worktree-agent-a7f641938f1144313</worktreeBranch></worktree>
+</task-notification>

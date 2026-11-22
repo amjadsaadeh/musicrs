@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "repl_fe895f81-61e0-4235-a420-e5a25adfd9e4",
+  "agent_id": "ab47cda2c4b432b09",
+  "subagent_type": "general-purpose",
+  "task_description": "harden ci workflow",
+  "token_usage": {
+    "input_tokens": 44,
+    "cache_creation_tokens": 49324,
+    "cache_read_tokens": 817511,
+    "output_tokens": 8127,
+    "api_call_count": 65
+  },
+  "started_at": "2026-11-22T15:55:59.082971216+01:00",
+  "completed_at": "2026-11-22T16:46:56.201027971+01:00"
+}

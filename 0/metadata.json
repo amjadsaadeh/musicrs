@@ -1,0 +1,71 @@
+{
+  "cli_version": "0.13.4",
+  "checkpoint_id": "01M81Z16YA8J50JAQE5MQ10G8Z",
+  "session_id": "860b07ee-3f92-4815-ab52-690d0ae10c8e",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-22T15:47:14.282962562Z",
+  "branch": "fix/dependency-updates",
+  "checkpoints_count": 3,
+  "files_touched": [
+    "Cargo.lock",
+    "Cargo.toml",
+    "src/music.rs",
+    "tests/golden/single-source_8000Hz_120deg_2.0s.narrowband.musicrs.csv",
+    "tests/golden/single-source_8000Hz_40deg_1.0s.narrowband.musicrs.csv",
+    "tests/golden/single-source_9100Hz_160deg_2.0s.narrowband.musicrs.csv",
+    "tests/golden/single-source_9100Hz_80deg_1.0s.narrowband.musicrs.csv"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-opus-5-5",
+  "turn_id": "2eb8fd59f01d",
+  "checkpoint_transcript_start": 1205,
+  "transcript_lines_at_start": 1205,
+  "compact_transcript_start": 87,
+  "token_usage": {
+    "input_tokens": 6,
+    "cache_creation_tokens": 5845,
+    "cache_read_tokens": 357587,
+    "output_tokens": 219,
+    "api_call_count": 3,
+    "subagent_tokens": {
+      "input_tokens": 6,
+      "cache_creation_tokens": 6720,
+      "cache_read_tokens": 171538,
+      "output_tokens": 3394,
+      "api_call_count": 3
+    },
+    "subagent_tokens_complete": true
+  },
+  "session_token_usage": {
+    "input_tokens": 64,
+    "cache_creation_tokens": 104728,
+    "cache_read_tokens": 2523486,
+    "output_tokens": 25127,
+    "api_call_count": 28,
+    "subagent_tokens": {
+      "input_tokens": 306,
+      "cache_creation_tokens": 427167,
+      "cache_read_tokens": 6787119,
+      "output_tokens": 49986,
+      "api_call_count": 146
+    },
+    "subagent_tokens_complete": true
+  },
+  "redaction": {
+    "replacements": 46,
+    "layers": {
+      "betterleaks": 0,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 46,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "session_metrics": {
+    "turn_count": 5
+  }
+}

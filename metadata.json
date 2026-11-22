@@ -1,0 +1,54 @@
+{
+  "cli_version": "0.13.4",
+  "checkpoint_id": "01M81Z16YA8J50JAQE5MQ10G8Z",
+  "strategy": "manual-commit",
+  "branch": "fix/dependency-updates",
+  "checkpoints_count": 3,
+  "files_touched": [
+    "Cargo.lock",
+    "Cargo.toml",
+    "src/music.rs",
+    "tests/golden/single-source_8000Hz_120deg_2.0s.narrowband.musicrs.csv",
+    "tests/golden/single-source_8000Hz_40deg_1.0s.narrowband.musicrs.csv",
+    "tests/golden/single-source_9100Hz_160deg_2.0s.narrowband.musicrs.csv",
+    "tests/golden/single-source_9100Hz_80deg_1.0s.narrowband.musicrs.csv"
+  ],
+  "sessions": [
+    {
+      "metadata": "/0/metadata.json",
+      "transcript": "/0/full.jsonl",
+      "compact_transcript": "/0/transcript.jsonl",
+      "content_hash": "/0/content_hash.txt",
+      "prompt": "/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 6,
+    "cache_creation_tokens": 5845,
+    "cache_read_tokens": 357587,
+    "output_tokens": 219,
+    "api_call_count": 3,
+    "subagent_tokens": {
+      "input_tokens": 6,
+      "cache_creation_tokens": 6720,
+      "cache_read_tokens": 171538,
+      "output_tokens": 3394,
+      "api_call_count": 3
+    },
+    "subagent_tokens_complete": true
+  },
+  "redaction": {
+    "replacements": 46,
+    "layers": {
+      "betterleaks": 0,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 46,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  }
+}
