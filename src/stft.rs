@@ -69,11 +69,11 @@ pub fn analytic_signal(data: &[f64]) -> Vec<Complex<f64>> {
 /// * `nfft`       – Window (FFT) size.
 /// * `no_overlap` – Number of samples shared between consecutive windows.
 ///
-/// Data shorter than `nfft` gives `nfft / 2 + 1` empty bins.
-///
 /// # Errors
 /// [`MusicError::InvalidNfft`] if `nfft` is 0, [`MusicError::InvalidOverlap`] if
-/// `no_overlap >= nfft`.
+/// `no_overlap >= nfft`, then [`MusicError::DataShorterThanWindow`] if `data` is shorter
+/// than `nfft`. The data length is checked before the FFT is planned, so memory stays bounded
+/// by the input size whatever `nfft` is.
 ///
 /// # Examples
 /// ```
@@ -104,6 +104,13 @@ pub fn stft(data: &[f64], nfft: usize, no_overlap: usize) -> Result<Vec<Vec<Comp
     if no_overlap >= nfft {
         return Err(MusicError::InvalidOverlap { no_overlap, nfft });
     }
+    if data.len() < nfft {
+        // Planning the FFT and allocating the bins are O(nfft): return before either.
+        return Err(MusicError::DataShorterThanWindow {
+            nfft,
+            samples: data.len(),
+        });
+    }
 
     let step = nfft - no_overlap;
     let freq_bins = nfft / 2 + 1;
@@ -111,11 +118,7 @@ pub fn stft(data: &[f64], nfft: usize, no_overlap: usize) -> Result<Vec<Vec<Comp
     // Use real-to-complex FFT plan (standard forward FFT on real-padded input)
     let fft = planner.plan_fft_forward(nfft);
 
-    let num_windows = if data.len() >= nfft {
-        (data.len() - nfft) / step + 1
-    } else {
-        0
-    };
+    let num_windows = (data.len() - nfft) / step + 1;
 
     // result[freq_bin][window_index]
     let mut result: Vec<Vec<Complex<f64>>> =
@@ -244,6 +247,34 @@ mod tests {
             Err(MusicError::InvalidOverlap {
                 no_overlap: 4,
                 nfft: 4
+            })
+        );
+    }
+
+    /// Data shorter than one window is an error, returned before the O(nfft) FFT plan and
+    /// bins are allocated: a huge `nfft` must not abort the process.
+    #[test]
+    fn stft_rejects_data_shorter_than_window() {
+        assert_eq!(
+            stft(&[0.0; 4], 1 << 40, 0),
+            Err(MusicError::DataShorterThanWindow {
+                nfft: 1 << 40,
+                samples: 4
+            })
+        );
+        assert_eq!(
+            stft(&[], 2, 1),
+            Err(MusicError::DataShorterThanWindow {
+                nfft: 2,
+                samples: 0
+            })
+        );
+        // Parameter errors come first.
+        assert_eq!(
+            stft(&[0.0; 4], 1 << 40, 1 << 40),
+            Err(MusicError::InvalidOverlap {
+                no_overlap: 1 << 40,
+                nfft: 1 << 40
             })
         );
     }

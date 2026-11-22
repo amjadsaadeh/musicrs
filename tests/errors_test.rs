@@ -480,6 +480,14 @@ fn stft_errors() {
             nfft: 4
         })
     );
+    // Checked before the O(nfft) FFT plan: a huge nfft returns at once.
+    assert_eq!(
+        stft(&[0.0; 4], 1 << 40, 0),
+        Err(MusicError::DataShorterThanWindow {
+            nfft: 1 << 40,
+            samples: 4
+        })
+    );
 }
 
 #[test]
