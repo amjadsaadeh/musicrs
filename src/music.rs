@@ -1211,6 +1211,30 @@ mod tests {
         );
     }
 
+    /// A plateau's midpoint stays in the search interval `[start, end)` wherever the
+    /// plateau sits, including when it wraps around a grid that does not start at 0.
+    #[test]
+    fn find_peaks_plateau_midpoint_stays_in_interval() {
+        let (start, step, len) = (-0.5, 1.0, 6);
+        let angles: Vec<f64> = (0..len).map(|i| start + step * i as f64).collect();
+        let end = start + step * len as f64;
+        for plateau_len in 1..=3 {
+            for first in 0..len {
+                let mut scores = vec![0.0; len];
+                for k in 0..plateau_len {
+                    scores[(first + k) % len] = 3.0;
+                }
+                let peaks = find_peaks(&scores, &angles, 1, true);
+                assert_eq!(peaks.len(), 1, "{scores:?}");
+                assert!(
+                    (start..end).contains(&peaks[0]),
+                    "{scores:?}: {} not in [{start}, {end})",
+                    peaks[0]
+                );
+            }
+        }
+    }
+
     #[test]
     fn find_peaks_single_point() {
         assert_eq!(find_peaks(&[2.0], &[0.5], 1, false), vec![0.5]);
