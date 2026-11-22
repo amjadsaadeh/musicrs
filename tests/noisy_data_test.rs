@@ -7,7 +7,7 @@
 
 mod common;
 
-use musicrs::MusicEstimator;
+use musicrs::{MusicEstimator, select_bins_by_energy};
 use nalgebra::DMatrix;
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -109,6 +109,47 @@ fn run_noisy_doa_test(snr_db: f64, tolerance_deg: f64) {
     log.check(tolerance_deg);
 }
 
+/// Like [`run_noisy_doa_test`], but with IFB-MUSIC on the bins `select_bins_by_energy`
+/// picks (within 20 dB of the strongest, nfft 160), for the recordings below Nyquist.
+/// White noise spreads over all 80 bins while the tone sits in one, so the tone's bin
+/// stays far stronger than the rest even at 1 dB SNR overall.
+fn run_noisy_ifb_test(snr_db: f64, tolerance_deg: f64) {
+    const NFFT: usize = 160;
+    let estimator = MusicEstimator::default();
+    let mut log = common::ErrorLog::new(format!("IFB energy-selected bins @ {snr_db} dB SNR"));
+
+    for (file_idx, path) in common::wav_files().iter().enumerate() {
+        let meta = common::parse_meta(path);
+        if meta.frequency_hz >= estimator.sample_rate / 2.0 {
+            continue;
+        }
+        let (_, real_data) = common::read_wav_4ch(path);
+        let seed = (snr_db as u64).wrapping_mul(1_000) ^ (file_idx as u64).wrapping_mul(7_919);
+        let noisy = add_white_noise(&real_data, snr_db, seed);
+
+        let bins = select_bins_by_energy(&noisy, NFFT, 20.0).unwrap();
+        let (spectrum, angles) = estimator
+            .ifb_music_spectrum(&noisy, NFFT, 1, Some(&bins))
+            .unwrap();
+        let argmax = (0..spectrum.len())
+            .max_by(|&a, &b| spectrum[a].total_cmp(&spectrum[b]))
+            .unwrap();
+        let error = common::angular_error(
+            angles[argmax].to_degrees(),
+            &[meta.doa_deg, 360.0 - meta.doa_deg],
+        );
+        log.record(
+            format!(
+                "{} (bins {bins:?})",
+                path.file_name().unwrap().to_string_lossy()
+            ),
+            error,
+        );
+    }
+
+    log.check(tolerance_deg);
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Tests
 // ─────────────────────────────────────────────────────────────────────────────
@@ -143,4 +184,27 @@ fn test_single_source_doa_noisy_5db() {
 #[ignore = "slow"]
 fn test_single_source_doa_noisy_1db() {
     run_noisy_doa_test(1.0, 8.0);
+}
+
+/// IFB-MUSIC with energy-selected bins at 10 dB SNR: selection picks only the tone's bin
+/// everywhere. Worst measured error 3.0° (300 Hz, 0°).
+#[test]
+#[ignore = "slow"]
+fn ifb_energy_selected_bins_noisy_10db() {
+    run_noisy_ifb_test(10.0, 5.0);
+}
+
+/// At 5 dB SNR: worst measured error 1.5° (3600 Hz, 0°).
+#[test]
+#[ignore = "slow"]
+fn ifb_energy_selected_bins_noisy_5db() {
+    run_noisy_ifb_test(5.0, 5.0);
+}
+
+/// At 1 dB SNR the weak 300 Hz recordings no longer stand 20 dB above the noise, so
+/// selection also picks noise-only bins. Worst measured error 6.5° (300 Hz, 40°).
+#[test]
+#[ignore = "slow"]
+fn ifb_energy_selected_bins_noisy_1db() {
+    run_noisy_ifb_test(1.0, 8.0);
 }

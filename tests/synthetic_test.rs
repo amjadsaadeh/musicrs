@@ -9,7 +9,7 @@ mod common;
 
 use std::f64::consts::PI;
 
-use musicrs::MusicEstimator;
+use musicrs::{MusicError, MusicEstimator, select_bins_by_energy};
 use nalgebra::DMatrix;
 use num_complex::Complex;
 
@@ -181,4 +181,62 @@ fn line_array_endfire_between_grid_points() {
             0.01,
         );
     }
+}
+
+/// A Kinect-array plane wave at `freq` from `doa_deg`, sampled at the estimator's rate.
+fn kinect_tone(est: &MusicEstimator, freq: f64, doa_deg: f64, n_samples: usize) -> DMatrix<f64> {
+    let doa = f64::to_radians(doa_deg);
+    DMatrix::from_fn(4, n_samples, |m, t| {
+        let p = est.antenna_positions[m];
+        (2.0 * PI * freq * (t as f64 / est.sample_rate + advance(p, doa))).cos()
+    })
+}
+
+/// Zero sources and frequency 0 (every steering vector is the same, so the spectrum is
+/// flat) have nothing to find and return no angles. An empty search grid is an error.
+#[test]
+fn degenerate_configurations_find_nothing() {
+    let est = MusicEstimator::default();
+    let data = kinect_tone(&est, 1000.0, 40.0, 1000);
+    let no_grid = MusicEstimator {
+        angle_steps_num: 0,
+        ..MusicEstimator::default()
+    };
+    assert!(matches!(
+        no_grid.estimate_doa_from_real(&data, 1, 1000.0),
+        Err(MusicError::InvalidAngleGrid { .. })
+    ));
+    assert_eq!(est.estimate_doa_from_real(&data, 0, 1000.0), Ok(vec![]));
+    assert_eq!(est.estimate_doa_from_real(&data, 1, 0.0), Ok(vec![]));
+}
+
+/// Very short recordings: two or three samples still give an estimate. A single sample
+/// is silent, because removing its mean leaves nothing.
+#[test]
+fn very_short_data() {
+    let est = MusicEstimator::default();
+    let doa = |n| est.estimate_doa_from_real(&kinect_tone(&est, 1000.0, 40.0, n), 1, 1000.0);
+    assert_eq!(doa(1), Err(MusicError::SilentData));
+    for n in 2..=3 {
+        assert!(doa(n).is_ok(), "n = {n}: {:?}", doa(n));
+    }
+}
+
+/// IFB-MUSIC and bin selection at 48 kHz: bin frequencies follow `sample_rate`.
+/// nfft = 480 gives 100 Hz bins, so the 1 kHz tone is bin 10.
+#[test]
+fn ifb_at_48_khz() {
+    let est = MusicEstimator {
+        sample_rate: 48000.0,
+        ..MusicEstimator::default()
+    };
+    let data = kinect_tone(&est, 1000.0, 40.0, 48000);
+    let bins = select_bins_by_energy(&data, 480, 20.0).unwrap();
+    assert_eq!(bins, [10]);
+    let (spectrum, angles) = est.ifb_music_spectrum(&data, 480, 1, Some(&bins)).unwrap();
+    let argmax = (0..spectrum.len())
+        .max_by(|&a, &b| spectrum[a].total_cmp(&spectrum[b]))
+        .unwrap();
+    let error = common::angular_error(angles[argmax].to_degrees(), &[40.0, 320.0]);
+    assert!(error <= 0.5, "got {}°", angles[argmax].to_degrees());
 }
