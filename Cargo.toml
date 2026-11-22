@@ -10,7 +10,7 @@ name = "musicrs"
 path = "src/lib.rs"
 
 [dependencies]
-nalgebra    = "0.33"
+nalgebra    = "0.35"
 num-complex = "0.4"
 rustfft     = "6"
 faer        = "0.24"
