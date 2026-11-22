@@ -41,8 +41,7 @@ type CVec = DVector<Cplx>;
 /// Returns `(eigenvalues, eigenvectors)` sorted by ascending eigenvalue.
 /// `eigenvalues[k]` is real; `eigenvectors.column(k)` is the unit-norm eigenvector.
 fn hermitian_eigen(mat: &CMatrix) -> (Vec<f64>, CMatrix) {
-    use faer::complex_native::c64;
-    use faer::{Mat as FaerMat, Side};
+    use faer::{Mat as FaerMat, Side, c64};
 
     let n = mat.nrows();
 
@@ -52,25 +51,28 @@ fn hermitian_eigen(mat: &CMatrix) -> (Vec<f64>, CMatrix) {
         c64::new(c.re, c.im)
     });
 
-    // Numerically stable Hermitian eigendecomposition
-    // Note: faer does not guarantee a sort order, so we sort ascending afterward.
-    let evd = faer_mat.selfadjoint_eigendecomposition(Side::Lower);
+    // Numerically stable Hermitian eigendecomposition. It only fails to converge on
+    // non-finite input, which every caller rejects first.
+    let evd = faer_mat
+        .self_adjoint_eigen(Side::Lower)
+        .expect("Hermitian eigendecomposition of a finite matrix converges");
 
     // Eigenvalues are real but stored as c64 with im ≈ 0; extract via .re
-    let s_col = evd.s().column_vector();
-    let u_mat = evd.u();
+    let s_col = evd.S().column_vector();
+    let u_mat = evd.U();
 
-    // Sort by ascending (real) eigenvalue
+    // faer documents its eigenvalues as nondecreasing; sort anyway so the ascending
+    // order this function promises does not depend on that.
     let mut order: Vec<usize> = (0..n).collect();
-    order.sort_unstable_by(|&a, &b| s_col.read(a).re.total_cmp(&s_col.read(b).re));
+    order.sort_unstable_by(|&a, &b| s_col[a].re.total_cmp(&s_col[b].re));
 
-    let eigenvalues: Vec<f64> = order.iter().map(|&i| s_col.read(i).re).collect();
+    let eigenvalues: Vec<f64> = order.iter().map(|&i| s_col[i].re).collect();
     // Copy the eigenvectors (reordered by ascending eigenvalue) back into nalgebra.
     // faer's eigenvectors already satisfy A·v = λ·v, so no conjugation is applied;
     // the steering-vector sign convention in `steering_vector` is matched to this.
     let eigenvectors: CMatrix = CMatrix::from_fn(n, n, |row, col| {
         let src_col = order[col];
-        let c = u_mat.read(row, src_col);
+        let c = u_mat[(row, src_col)];
         Cplx::new(c.re, c.im)
     });
 
