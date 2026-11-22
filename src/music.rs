@@ -90,7 +90,8 @@ fn hermitian_eigen(mat: &CMatrix) -> (Vec<f64>, CMatrix) {
 /// With `circular` (the grid covers the full circle), the first and last points are
 /// neighbours and a run may wrap around. Otherwise they are the two ends of an open range
 /// with only one neighbour each, so a spectrum still rising at an end of the range peaks
-/// there. A spectrum that is constant over the whole grid has no peak.
+/// there. A spectrum that is constant over a grid of two or more points has no peak; a
+/// one-point open grid peaks at its only point.
 fn find_peaks(scores: &[f64], angles: &[f64], n: usize, circular: bool) -> Vec<f64> {
     let len = scores.len();
     if len == 0 || n == 0 {
@@ -107,7 +108,13 @@ fn find_peaks(scores: &[f64], angles: &[f64], n: usize, circular: bool) -> Vec<f
         }
     }
     if runs.len() == 1 {
-        return Vec::new();
+        // A single point on an open range has no neighbours, so it is a peak (as for
+        // `angle_steps_num = 1`); a longer constant spectrum has none.
+        return if len == 1 && !circular {
+            vec![angles[0]]
+        } else {
+            Vec::new()
+        };
     }
     // On the circle, a run at the start continues the run at the end. Its indices then
     // go past `len` and are taken modulo `len`.
@@ -1196,6 +1203,13 @@ mod tests {
             find_peaks(&[3.0, 1.0, 0.0, 0.0, 1.0, 3.0], &angles, 5, false),
             [0.0, 5.0]
         );
+    }
+
+    #[test]
+    fn find_peaks_single_point() {
+        assert_eq!(find_peaks(&[2.0], &[0.5], 1, false), vec![0.5]);
+        // On the circle the only point is its own neighbour, so it is not higher.
+        assert!(find_peaks(&[2.0], &[0.5], 1, true).is_empty());
     }
 
     #[test]

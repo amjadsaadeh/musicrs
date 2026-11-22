@@ -222,6 +222,18 @@ fn extreme_amplitudes() {
     }
 }
 
+/// A one-point grid on an open interval reports its only angle.
+#[test]
+fn one_point_grid() {
+    let est = MusicEstimator {
+        angle_steps_num: 1,
+        search_interval: (0.0, PI),
+        ..MusicEstimator::default()
+    };
+    let data = kinect_tone(&est, 1000.0, 40.0, 1000);
+    assert_eq!(est.estimate_doa_from_real(&data, 1, 1000.0), Ok(vec![0.0]));
+}
+
 /// Zero sources and frequency 0 (every steering vector is the same, so the spectrum is
 /// flat) have nothing to find and return no angles. An empty search grid is an error.
 #[test]
