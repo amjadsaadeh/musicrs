@@ -1,8 +1,8 @@
 name: CI
 
 on:
+  # Every pull request, whatever its base, so PRs stacked on another PR's branch get CI too
   pull_request:
-    branches: [main]
 
 permissions:
   contents: read

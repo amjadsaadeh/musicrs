@@ -170,6 +170,16 @@ pub fn select_bins_by_energy(data: &DMatrix<f64>, nfft: usize, threshold_db: f64
     (1..power.len()).filter(|&k| power[k] >= floor).collect()
 }
 
+/// Panics unless the angle grid is usable: at least one step and a finite
+/// `start < end` search interval (pyMUSIC asserts the latter in `MUSICEst.__init__`).
+fn assert_valid_angle_grid(angle_steps_num: usize, (start, end): (f64, f64)) {
+    assert!(angle_steps_num > 0, "angle_steps_num must be positive");
+    assert!(
+        start.is_finite() && end.is_finite() && start < end,
+        "search_interval must be finite with start < end"
+    );
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // MusicEstimator
 // ─────────────────────────────────────────────────────────────────────────────
@@ -221,12 +231,18 @@ impl MusicEstimator {
     /// * `angle_steps_num`   – Number of discrete angles to evaluate.
     /// * `search_interval`   – `(start_rad, end_rad)` search range.
     /// * `sample_rate`       – Sample rate in Hz (used for aliasing-aware steering).
+    ///
+    /// # Panics
+    /// Panics if `angle_steps_num` is zero or `search_interval` is not a finite range with
+    /// `start < end`. The fields are public, so the methods that build the angle grid check
+    /// this again.
     pub fn new(
         antenna_positions: Vec<[f64; 2]>,
         angle_steps_num: usize,
         search_interval: (f64, f64),
         sample_rate: f64,
     ) -> Self {
+        assert_valid_angle_grid(angle_steps_num, search_interval);
         Self {
             antenna_positions,
             angle_steps_num,
@@ -248,13 +264,30 @@ impl MusicEstimator {
         ((end - start).abs() - 2.0 * PI).abs() <= 1e-9
     }
 
+    /// The search grid: `angle_steps_num` angles from `start` (included) to `end` (excluded).
+    fn angle_grid(&self) -> Vec<f64> {
+        assert_valid_angle_grid(self.angle_steps_num, self.search_interval);
+        let (start, end) = self.search_interval;
+        let steps = self.angle_steps_num;
+        (0..steps)
+            .map(|i| start + (end - start) * i as f64 / steps as f64)
+            .collect()
+    }
+
     // ─── Core algorithm ───────────────────────────────────────────────────────
 
     /// Computes the steering vector for a plane wave arriving from `angle` (radians)
     /// at `frequency` (Hz).
     ///
-    /// Element *j* is `exp(−i·2π·f·τⱼ)` where
-    /// `τⱼ = (pⱼ · d̂) / c` is the propagation delay to antenna *j*.
+    /// Element *j* is `exp(+i·2π·f·τⱼ)` where `τⱼ = (pⱼ · d̂) / c` is the projection of
+    /// antenna *j*'s position onto the arrival direction, divided by the speed of sound. This
+    /// matches the non-conjugated [`analytic_signal`] and STFT bins
+    /// (pyMUSIC conjugates its analytic signal and uses `exp(−i·2π·f·τⱼ)`; the two agree below
+    /// Nyquist). Relative to [`sample_rate`](Self::sample_rate):
+    /// * above Nyquist the exponent is negated, `exp(−i·2π·f·τⱼ)`, because the recorded tone
+    ///   is aliased and its phase is conjugated;
+    /// * within 0.5 Hz of Nyquist the vector is real, `cos(2π·f·τⱼ)`, because the analytic
+    ///   signal there is real too.
     ///
     /// # Examples
     /// ```
@@ -327,18 +360,22 @@ impl MusicEstimator {
     /// High values indicate signal directions of arrival.
     ///
     /// # Arguments
-    /// * `noise_mat` – Noise subspace matrix (n × n_noise) from [`noise_subspace`].
+    /// * `noise_mat` – Noise subspace matrix (n × n_noise) from [`noise_subspace`](Self::noise_subspace).
     /// * `frequency` – Signal frequency in Hz.
     ///
     /// # Returns
     /// `(spectrum, angles)` — corresponding vectors of the same length.
+    ///
+    /// # Panics
+    /// Panics if `noise_mat` does not have one row per antenna, or if the angle grid is
+    /// invalid (see [`new`](Self::new)).
     pub fn spectrum(&self, noise_mat: &CMatrix, frequency: f64) -> (Vec<f64>, Vec<f64>) {
-        let (start, end) = self.search_interval;
-        let steps = self.angle_steps_num;
-
-        let angles: Vec<f64> = (0..steps)
-            .map(|i| start + (end - start) * i as f64 / steps as f64)
-            .collect();
+        assert_eq!(
+            noise_mat.nrows(),
+            self.n_antennas(),
+            "noise_mat must have one row per antenna"
+        );
+        let angles = self.angle_grid();
 
         let scores: Vec<f64> = angles
             .iter()
@@ -366,7 +403,16 @@ impl MusicEstimator {
     ///
     /// # Returns
     /// Up to `n_sources` estimated angles (radians), sorted by descending peak height.
+    ///
+    /// # Panics
+    /// Panics if the number of rows of `data` differs from the number of antennas, or if
+    /// `n_sources >= n_antennas`.
     pub fn estimate_doa(&self, data: &CMatrix, n_sources: usize, frequency: f64) -> Vec<f64> {
+        assert_eq!(
+            data.nrows(),
+            self.n_antennas(),
+            "data must have one row per antenna"
+        );
         let n_samples = data.ncols() as f64;
         let cov = (data * data.adjoint()).scale(1.0 / n_samples);
         let noise_mat = self.noise_subspace(&cov, n_sources);
@@ -445,6 +491,10 @@ impl MusicEstimator {
     ///
     /// # Returns
     /// `(spectrum, angles)` — the IFB-MUSIC spectrum and corresponding angles.
+    ///
+    /// # Panics
+    /// Panics if the number of rows of `data` differs from the number of antennas, or if
+    /// `n_sources >= n_antennas` (checked per bin, so not when no bin is processed).
     pub fn ifb_music_spectrum(
         &self,
         data: &DMatrix<f64>,
@@ -452,6 +502,11 @@ impl MusicEstimator {
         n_sources: usize,
         bins: Option<&[usize]>,
     ) -> (Vec<f64>, Vec<f64>) {
+        assert_eq!(
+            data.nrows(),
+            self.n_antennas(),
+            "data must have one row per antenna"
+        );
         let n_mics = data.nrows();
         let freq_bins = nfft / 2 + 1;
 
@@ -465,14 +520,7 @@ impl MusicEstimator {
 
         let n_windows = stfts[0][0].len();
 
-        let make_flat_spectrum = || {
-            let (start, end) = self.search_interval;
-            let steps = self.angle_steps_num;
-            let angles: Vec<f64> = (0..steps)
-                .map(|i| start + (end - start) * i as f64 / steps as f64)
-                .collect();
-            (vec![1.0; steps], angles)
-        };
+        let make_flat_spectrum = || (vec![1.0; self.angle_steps_num], self.angle_grid());
 
         if n_windows == 0 {
             return make_flat_spectrum();
@@ -568,7 +616,7 @@ mod tests {
 
     /// MUSIC from a rank-1 covariance built with NOISE: the noise subspace
     /// should be orthogonal to the steering vector, so `estimate_doa` returns the true angle.
-    /// This test uses pyMUSIC sign convention: z_i = a(θ)_i × exp(iωt).
+    /// The signal follows musicrs's sign convention: z_i = a(θ)_i × exp(iωt).
     #[test]
     fn estimate_doa_from_rank1_covariance() {
         let est = default_est();
@@ -680,6 +728,61 @@ mod tests {
         let est = default_est();
         let n = est.n_antennas();
         est.noise_subspace(&CMatrix::identity(n, n), n);
+    }
+
+    // ── input validation ──────────────────────────────────────────────────────
+
+    #[test]
+    #[should_panic(expected = "angle_steps_num must be positive")]
+    fn new_rejects_zero_angle_steps() {
+        MusicEstimator::new(DEFAULT_ANTENNA_POSITIONS.to_vec(), 0, (0.0, PI), 16000.0);
+    }
+
+    #[test]
+    #[should_panic(expected = "search_interval must be finite with start < end")]
+    fn new_rejects_reversed_search_interval() {
+        MusicEstimator::new(DEFAULT_ANTENNA_POSITIONS.to_vec(), 360, (PI, 0.0), 16000.0);
+    }
+
+    #[test]
+    #[should_panic(expected = "search_interval must be finite with start < end")]
+    fn new_rejects_non_finite_search_interval() {
+        MusicEstimator::new(
+            DEFAULT_ANTENNA_POSITIONS.to_vec(),
+            360,
+            (0.0, f64::NAN),
+            16000.0,
+        );
+    }
+
+    /// The fields are public, so an invalid grid set after construction is caught too.
+    #[test]
+    #[should_panic(expected = "search_interval must be finite with start < end")]
+    fn spectrum_rejects_empty_search_interval_set_on_field() {
+        let est = MusicEstimator {
+            search_interval: (1.0, 1.0),
+            ..default_est()
+        };
+        let n = est.n_antennas();
+        est.spectrum(&CMatrix::identity(n, n - 1), 500.0);
+    }
+
+    #[test]
+    #[should_panic(expected = "noise_mat must have one row per antenna")]
+    fn spectrum_rejects_wrong_noise_mat_rows() {
+        default_est().spectrum(&CMatrix::identity(3, 2), 500.0);
+    }
+
+    #[test]
+    #[should_panic(expected = "data must have one row per antenna")]
+    fn estimate_doa_rejects_wrong_channel_count() {
+        default_est().estimate_doa(&CMatrix::zeros(3, 64), 1, 500.0);
+    }
+
+    #[test]
+    #[should_panic(expected = "data must have one row per antenna")]
+    fn ifb_music_spectrum_rejects_wrong_channel_count() {
+        default_est().ifb_music_spectrum(&DMatrix::zeros(3, 1024), 160, 1, None);
     }
 
     // ── steering_vector ───────────────────────────────────────────────────────
