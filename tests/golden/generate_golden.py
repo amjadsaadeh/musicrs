@@ -82,11 +82,22 @@ CASES = [
     ("single-source_2500Hz_0deg_2.0s.wav", 2500),
     ("single-source_5800Hz_160deg_2.0s.wav", 5800),
     ("single-source_6900Hz_120deg_1.0s.wav", 6900),
+    # All five angles at 3600 Hz and 6900 Hz, alternating 1 s / 2 s recordings
+    ("single-source_3600Hz_0deg_1.0s.wav", 3600),
+    ("single-source_3600Hz_40deg_2.0s.wav", 3600),
+    ("single-source_3600Hz_80deg_1.0s.wav", 3600),
+    ("single-source_3600Hz_120deg_2.0s.wav", 3600),
+    ("single-source_3600Hz_160deg_1.0s.wav", 3600),
+    ("single-source_6900Hz_0deg_2.0s.wav", 6900),
+    ("single-source_6900Hz_40deg_1.0s.wav", 6900),
+    ("single-source_6900Hz_80deg_2.0s.wav", 6900),
+    ("single-source_6900Hz_160deg_1.0s.wav", 6900),
 ]
 
 # Multi-bin IFB on the sum of several recordings at the same DOA (one bin per tone)
 COMPOSITE_CASES = [
     ("composite_300+1400+2500Hz_40deg_2.0s", [300, 1400, 2500], 40, "2.0s"),
+    ("composite_3600+4700+5800Hz_120deg_1.0s", [3600, 4700, 5800], 120, "1.0s"),
 ]
 
 def run_case(fname, freq, solver):
