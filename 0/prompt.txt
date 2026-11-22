@@ -1,0 +1,9 @@
+ok proceed and merge the prs
+
+---
+
+yes, delete the branches
+
+---
+
+well the logarithmic scale of the bar chart is hard to underatand kn first glance. make it linear even though it will be hard to aee the ms
