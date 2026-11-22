@@ -1,0 +1,7 @@
+{
+  "tool_use_id": "repl_c81bc69d-bd55-43a4-bc0f-c4a9d1f0d8cc",
+  "agent_id": "af87066f575de68f7",
+  "subagent_type": "general-purpose",
+  "task_description": "reject zero sources",
+  "started_at": "2026-11-22T15:55:59.049277343+01:00"
+}
