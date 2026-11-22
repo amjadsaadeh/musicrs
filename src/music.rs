@@ -712,7 +712,8 @@ impl MusicEstimator {
     /// * `n_sources`     – Number of sources.
     /// * `bins`          – Frequency bin indices to use; `None` uses all bins except DC.
     ///   The DC bin 0 (it has no direction information), bins at or above `nfft / 2 + 1`
-    ///   and bins with no power are ignored.
+    ///   and bins with no power are ignored. Each bin counts once in the geometric mean,
+    ///   however often it is listed and in whatever order.
     ///
     /// Bin frequencies are derived from [`MusicEstimator::sample_rate`], the same rate
     /// [`steering_vector`](Self::steering_vector) uses for its Nyquist handling.
@@ -758,12 +759,16 @@ impl MusicEstimator {
         let freq_bins = nfft / 2 + 1;
 
         let default_bins: Vec<usize> = (1..freq_bins).collect();
-        let active_bins: Vec<usize> = bins
+        let mut active_bins: Vec<usize> = bins
             .unwrap_or(&default_bins)
             .iter()
             .copied()
             .filter(|bin| (1..freq_bins).contains(bin))
             .collect();
+        // A repeated bin would count more than once in the geometric mean; the order of the
+        // bins does not change the mean.
+        active_bins.sort_unstable();
+        active_bins.dedup();
         if active_bins.is_empty() {
             return Err(MusicError::NoUsableBins);
         }
