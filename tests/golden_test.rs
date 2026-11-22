@@ -277,6 +277,25 @@ fn narrowband_two_sources_matches_pymusic() {
     );
 }
 
+/// IFB with two sources at different angles: 1400 Hz from 40° plus 2500 Hz from 120°, one
+/// bin per tone. Each bin holds one source, so IFB runs with one source per bin.
+#[test]
+fn ifb_two_sources_matches_pymusic() {
+    let est = MusicEstimator::default();
+    let a = common::read_wav_4ch(&common::wav_path(1400, 40, "1.0s")).1;
+    let b = common::read_wav_4ch(&common::wav_path(2500, 120, "1.0s")).1;
+    let n = a.ncols().min(b.ncols());
+    let data = a.columns(0, n) + b.columns(0, n);
+    let (spectrum, angles) = est
+        .ifb_music_spectrum(&data, NFFT, 1, Some(&[14, 25]))
+        .unwrap();
+    check(
+        "composite_1400Hz_40deg+2500Hz_120deg_1.0s.ifb_nfft160_bins14-25",
+        &angles,
+        &spectrum,
+    );
+}
+
 /// `analytic_signal` against `scipy.signal.hilbert`, value by value, for an even and an
 /// odd length (odd lengths have no Nyquist bin).
 #[test]

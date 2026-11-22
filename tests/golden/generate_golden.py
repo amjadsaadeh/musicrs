@@ -128,6 +128,12 @@ TWO_SOURCE_CASES = [
     ([(1400, 40), (2500, 120)], 1400, "1.0s"),
 ]
 
+# IFB with two sources at different angles and frequencies, one bin per tone (each bin
+# holds one source, so one source per bin): (parts, bins, duration)
+TWO_SOURCE_IFB_CASES = [
+    ([(1400, 40), (2500, 120)], [14, 25], "1.0s"),
+]
+
 # Analytic signal vs scipy: (recording, channel, lengths): even and odd lengths.
 HILBERT_CASES = [
     ("single-source_1400Hz_40deg_1.0s.wav", 0, [2048, 2047]),
@@ -157,14 +163,28 @@ def run_nfft(fname, nfft, bins, solver):
     print("wrote", fname, nfft, bins, solver)
 
 
-def run_two_sources(parts, freq, duration, solver):
+def sum_recordings(parts, duration):
+    """Sum of the recordings `(frequency, doa)` of one duration, trimmed to the shortest."""
     datas = [read_wav_4ch(os.path.join(DATA_DIR, f"single-source_{f}Hz_{doa}deg_{duration}.wav")) for f, doa in parts]
     n = min(d.shape[1] for d in datas)
-    data = sum(d[:, :n] for d in datas)
+    return sum(d[:, :n] for d in datas)
+
+
+def run_two_sources(parts, freq, duration, solver):
+    data = sum_recordings(parts, duration)
     spectrum, angles = narrowband(pyMUSIC.MUSICEst(), data, freq, n_sources=2)
     name = "+".join(f"{f}Hz_{doa}deg" for f, doa in parts)
     write_csv(f"composite_{name}_{duration}.narrowband_{freq}Hz_2src.{solver}.csv", spectrum, angles)
     print("wrote", name, solver)
+
+
+def run_two_source_ifb(parts, bins, duration, solver):
+    data = sum_recordings(parts, duration)
+    est = pyMUSIC.MUSICEst()
+    spectrum, angles = pyMUSIC.IFBMUSICSpectrum(data, est.antennaPositions, NFFT, bins=bins)
+    name = "+".join(f"{f}Hz_{doa}deg" for f, doa in parts)
+    write_csv(f"composite_{name}_{duration}.ifb_nfft{NFFT}_bins{'-'.join(map(str, bins))}.{solver}.csv", spectrum, angles)
+    print("wrote", name, "ifb", solver)
 
 
 def run_hilbert(fname, channel, lengths):
@@ -221,6 +241,8 @@ for solver, eig in [("eig", original_eig), ("eigh", np.linalg.eigh)]:
         run_nfft(fname, nfft, bins, solver)
     for parts, freq, duration in TWO_SOURCE_CASES:
         run_two_sources(parts, freq, duration, solver)
+    for parts, bins, duration in TWO_SOURCE_IFB_CASES:
+        run_two_source_ifb(parts, bins, duration, solver)
 np.linalg.eig = original_eig
 
 for fname, channel, lengths in HILBERT_CASES:
