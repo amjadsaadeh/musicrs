@@ -8,6 +8,9 @@
 //! IFB-MUSIC (`ifb_music_spectrum`) is then run on the real-valued composite
 //! data and the estimated DOA is checked against the ground-truth angle.
 //!
+//! The two-source tests at the end sum two recordings from different angles at different
+//! frequencies and check that IFB-MUSIC finds both.
+//!
 //! Tolerances are set from the measured worst errors; see `TOL_TARGETED` and
 //! `TOL_TRIPLES`.
 
@@ -505,4 +508,84 @@ fn ifb_music_broadband_energy_selected_bins() {
     }
 
     log.check(TOL_ENERGY);
+}
+
+// ─── Two sources ──────────────────────────────────────────────────────────────
+
+/// The `k` highest local maxima (circular) of a spectrum, in degrees.
+fn top_peaks_deg(spectrum: &[f64], angles_rad: &[f64], k: usize) -> Vec<f64> {
+    let len = spectrum.len();
+    let mut peaks: Vec<(f64, f64)> = (0..len)
+        .filter(|&i| {
+            spectrum[i] > spectrum[(i + len - 1) % len] && spectrum[i] > spectrum[(i + 1) % len]
+        })
+        .map(|i| (spectrum[i], angles_rad[i].to_degrees()))
+        .collect();
+    peaks.sort_unstable_by(|a, b| b.0.total_cmp(&a.0));
+    peaks.into_iter().take(k).map(|(_, a)| a).collect()
+}
+
+/// IFB on two recordings from different angles at different frequencies, one bin per tone
+/// (nfft 160, 100 Hz bins): both angles are among the four highest peaks (two sources,
+/// each with its mirror image on the line array). Returns the worst error.
+fn two_source_error(est: &MusicEstimator, (f1, a1): (u32, u32), (f2, a2): (u32, u32)) -> f64 {
+    let d1 = common::read_wav_4ch(&common::wav_path(f1, a1, "1.0s")).1;
+    let d2 = common::read_wav_4ch(&common::wav_path(f2, a2, "1.0s")).1;
+    let n = d1.ncols().min(d2.ncols());
+    let data = d1.columns(0, n) + d2.columns(0, n);
+    let bins = [f1 as usize / 100, f2 as usize / 100];
+    let (spectrum, angles) = est.ifb_music_spectrum(&data, 160, 1, Some(&bins)).unwrap();
+    let peaks = top_peaks_deg(&spectrum, &angles, 4);
+    [a1, a2]
+        .iter()
+        .map(|&truth| {
+            peaks
+                .iter()
+                .map(|&p| min_equivalent_error_deg(p, truth as f64))
+                .fold(f64::INFINITY, f64::min)
+        })
+        .fold(0.0, f64::max)
+}
+
+/// Every pair of distinct angles, each with a different pair of frequencies.
+#[test]
+fn ifb_music_two_sources_at_different_angles() {
+    let est = MusicEstimator::default();
+    let below_nyquist = &ALL_FREQS[..7];
+    let mut log = common::ErrorLog::new("IFB, two sources");
+    let mut k = 0;
+    for (i, &a1) in ALL_ANGLES_DEG.iter().enumerate() {
+        for &a2 in &ALL_ANGLES_DEG[i + 1..] {
+            let (f1, f2) = (below_nyquist[k % 7], below_nyquist[(k + 3) % 7]);
+            k += 1;
+            log.record(
+                format!("{f1} Hz @ {a1}° + {f2} Hz @ {a2}°"),
+                two_source_error(&est, (f1, a1), (f2, a2)),
+            );
+        }
+    }
+    log.check(TOL_TARGETED);
+}
+
+/// All 420 combinations of two frequencies below Nyquist and two distinct angles. Worst
+/// measured error is 0.00°.
+#[test]
+#[ignore = "slow"]
+fn ifb_music_two_sources_all_combinations() {
+    let est = MusicEstimator::default();
+    let below_nyquist = &ALL_FREQS[..7];
+    let mut log = common::ErrorLog::new("IFB, two sources, all combinations");
+    for (i, &f1) in below_nyquist.iter().enumerate() {
+        for &f2 in &below_nyquist[i + 1..] {
+            for &a1 in &ALL_ANGLES_DEG {
+                for &a2 in ALL_ANGLES_DEG.iter().filter(|&&a| a != a1) {
+                    log.record(
+                        format!("{f1} Hz @ {a1}° + {f2} Hz @ {a2}°"),
+                        two_source_error(&est, (f1, a1), (f2, a2)),
+                    );
+                }
+            }
+        }
+    }
+    log.check(TOL_TARGETED);
 }
