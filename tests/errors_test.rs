@@ -335,6 +335,141 @@ fn ifb_music_spectrum_ignores_dc_bin() {
     );
 }
 
+/// The complex entry point checks the source count and the angle grid itself.
+#[test]
+fn estimate_doa_parameter_errors() {
+    let complex = tone(1000).map(|x| Complex::new(x, 0.0));
+    assert_eq!(
+        MusicEstimator::default().estimate_doa(&complex, 4, 1000.0),
+        Err(TOO_MANY)
+    );
+    let no_grid = MusicEstimator {
+        angle_steps_num: 0,
+        ..MusicEstimator::default()
+    };
+    assert!(matches!(
+        no_grid.estimate_doa(&complex, 1, 1000.0),
+        Err(MusicError::InvalidAngleGrid { .. })
+    ));
+}
+
+/// An estimator without antennas has room for no source.
+#[test]
+fn no_antennas() {
+    let est = MusicEstimator {
+        antenna_positions: vec![],
+        ..MusicEstimator::default()
+    };
+    let none = |n_sources| MusicError::TooManySources {
+        n_sources,
+        n_antennas: 0,
+    };
+    let data = DMatrix::zeros(0, 1000);
+    assert_eq!(est.estimate_doa_from_real(&data, 0, 1000.0), Err(none(0)));
+    assert_eq!(est.estimate_doa_from_real(&data, 1, 1000.0), Err(none(1)));
+    assert_eq!(
+        est.ifb_music_spectrum(&data, NFFT, 0, None).map(|_| ()),
+        Err(none(0))
+    );
+    assert_eq!(
+        none(0).to_string(),
+        "0 sources requested, but at most 0 fit 0 antennas"
+    );
+}
+
+/// A noise subspace that annihilates every steering vector (all zeros, or no columns)
+/// scores every angle as infinitely likely, instead of dividing by zero into NaN.
+#[test]
+fn spectrum_of_zero_noise_subspace_is_infinite() {
+    let est = MusicEstimator::default();
+    for noise in [DMatrix::zeros(4, 3), DMatrix::zeros(4, 0)] {
+        let (spectrum, angles) = est.spectrum(&noise, 1000.0).unwrap();
+        assert_eq!(angles.len(), 720);
+        assert!(spectrum.iter().all(|&s| s == f64::INFINITY));
+    }
+}
+
+/// Every error's message names the problem and the offending values.
+#[test]
+fn every_error_message() {
+    let cases = [
+        (
+            MusicError::RowCountMismatch {
+                expected: 4,
+                got: 3,
+            },
+            "expected 4 rows (one per antenna), got 3",
+        ),
+        (
+            MusicError::CovarianceShape {
+                n_antennas: 4,
+                rows: 4,
+                cols: 3,
+            },
+            "covariance matrix is 4 × 3, expected 4 × 4 (one row and column per antenna)",
+        ),
+        (MusicError::EmptyData, "data has no samples"),
+        (
+            MusicError::DataShorterThanWindow {
+                nfft: 160,
+                samples: 100,
+            },
+            "data has 100 samples, fewer than one STFT window of 160",
+        ),
+        (
+            MusicError::NonFiniteData,
+            "data contains NaN or infinite values",
+        ),
+        (
+            MusicError::SilentData,
+            "data is silent: there is no signal to locate",
+        ),
+        (
+            TOO_MANY,
+            "4 sources requested, but at most 3 fit 4 antennas",
+        ),
+        (MusicError::InvalidNfft, "nfft must be at least 1"),
+        (
+            MusicError::InvalidOverlap {
+                no_overlap: 5,
+                nfft: 4,
+            },
+            "overlap of 5 samples must be less than nfft = 4",
+        ),
+        (
+            MusicError::InvalidThreshold(-3.0),
+            "threshold must be finite and non-negative, got -3 dB",
+        ),
+        (
+            MusicError::NoUsableBins,
+            "none of the requested frequency bins is usable (each must be in 1..=nfft/2)",
+        ),
+        (
+            MusicError::InvalidAngleGrid {
+                angle_steps_num: 0,
+                search_interval: (0.0, 1.5),
+            },
+            "invalid angle grid: 0 steps over (0, 1.5); need at least one step and a finite \
+             interval with start < end spanning at most 2π",
+        ),
+        (
+            MusicError::InvalidFrequency(-1000.0),
+            "frequency must be finite and positive, got -1000 Hz",
+        ),
+        (
+            MusicError::InvalidSampleRate(0.0),
+            "sample rate must be finite and positive, got 0 Hz",
+        ),
+        (
+            MusicError::InvalidAntennaPosition { index: 2 },
+            "antenna 2 has a NaN or infinite position",
+        ),
+    ];
+    for (error, message) in cases {
+        assert_eq!(error.to_string(), message);
+    }
+}
+
 #[test]
 fn stft_errors() {
     assert_eq!(stft(&[0.0; 8], 0, 0), Err(MusicError::InvalidNfft));
