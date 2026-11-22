@@ -73,40 +73,79 @@ fn hermitian_eigen(mat: &CMatrix) -> (Vec<f64>, CMatrix) {
 // Peak detection
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Returns the angles corresponding to the `n` largest local maxima in `scores`,
-/// sorted by descending peak height.
+/// Returns the angles of the `n` highest peaks in `scores`, sorted by descending peak
+/// height.
 ///
-/// A point is a peak when it is strictly greater than each of its neighbours. With
-/// `circular` (the grid covers the full circle), the first and last points are
-/// neighbours. Otherwise they are the two ends of an open range and each has only one
-/// neighbour, so a spectrum still rising at an end of the range peaks there.
+/// A peak is a run of one or more equal neighbouring scores that is strictly higher than
+/// the scores on either side of it; it is reported at the run's midpoint. Runs of equal
+/// scores happen on symmetric spectra: a line array's spectrum is mirror-symmetric, so a
+/// source at endfire between two grid points scores exactly the same on both.
+///
+/// With `circular` (the grid covers the full circle), the first and last points are
+/// neighbours and a run may wrap around. Otherwise they are the two ends of an open range
+/// with only one neighbour each, so a spectrum still rising at an end of the range peaks
+/// there. A spectrum that is constant over the whole grid has no peak.
 fn find_peaks(scores: &[f64], angles: &[f64], n: usize, circular: bool) -> Vec<f64> {
     let len = scores.len();
     if len == 0 || n == 0 {
         return Vec::new();
     }
 
-    let mut peaks: Vec<(f64, f64)> = (0..len)
-        .filter_map(|i| {
-            let prev = match i {
-                0 if circular => Some(scores[len - 1]),
+    // Runs of equal scores as inclusive index ranges.
+    let mut runs: Vec<(usize, usize)> = Vec::new();
+    let mut run_start = 0;
+    for i in 1..=len {
+        if i == len || scores[i] != scores[run_start] {
+            runs.push((run_start, i - 1));
+            run_start = i;
+        }
+    }
+    if runs.len() == 1 {
+        return Vec::new();
+    }
+    // On the circle, a run at the start continues the run at the end. Its indices then
+    // go past `len` and are taken modulo `len`.
+    if circular && scores[0] == scores[len - 1] {
+        let (_, first_end) = runs.remove(0);
+        runs.last_mut().unwrap().1 = first_end + len;
+    }
+
+    let score = |i: usize| scores[i % len];
+    let midpoint = |(a, b): (usize, usize)| {
+        if b < len {
+            (angles[a] + angles[b]) / 2.0
+        } else {
+            let step = angles[1] - angles[0];
+            let mid = (a + b) as f64 / 2.0;
+            if mid >= len as f64 {
+                angles[0] + step * (mid - len as f64)
+            } else {
+                angles[a] + step * (mid - a as f64)
+            }
+        }
+    };
+
+    let r = runs.len();
+    let mut peaks: Vec<(f64, f64)> = (0..r)
+        .filter_map(|k| {
+            let (a, b) = runs[k];
+            let prev = match k {
+                0 if circular => Some(score(runs[r - 1].1)),
                 0 => None,
-                _ => Some(scores[i - 1]),
+                _ => Some(score(runs[k - 1].1)),
             };
-            let next = match i + 1 {
-                j if j < len => Some(scores[j]),
-                _ if circular => Some(scores[0]),
+            let next = match k + 1 {
+                j if j < r => Some(score(runs[j].0)),
+                _ if circular => Some(score(runs[0].0)),
                 _ => None,
             };
-            if prev.is_none_or(|p| scores[i] > p) && next.is_none_or(|q| scores[i] > q) {
-                Some((scores[i], angles[i]))
-            } else {
-                None
-            }
+            let v = score(a);
+            (prev.is_none_or(|p| v > p) && next.is_none_or(|q| v > q))
+                .then(|| (v, midpoint((a, b))))
         })
         .collect();
 
-    peaks.sort_unstable_by(|a, b| b.0.partial_cmp(&a.0).unwrap());
+    peaks.sort_unstable_by(|a, b| b.0.total_cmp(&a.0));
     peaks.into_iter().take(n).map(|(_, a)| a).collect()
 }
 
@@ -994,6 +1033,56 @@ mod tests {
             find_peaks(&[1.0, 2.0, 3.0, 2.0, 1.0], &angles, 5, false),
             [2.0]
         );
+    }
+
+    /// A run of equal scores is one peak, reported at its midpoint.
+    #[test]
+    fn find_peaks_plateau_reports_midpoint() {
+        let angles = [0.0, 1.0, 2.0, 3.0, 4.0, 5.0];
+        for circular in [false, true] {
+            assert_eq!(
+                find_peaks(&[0.0, 1.0, 3.0, 3.0, 1.0, 0.0], &angles, 5, circular),
+                [2.5]
+            );
+            assert_eq!(
+                find_peaks(&[0.0, 3.0, 3.0, 3.0, 1.0, 0.0], &angles, 5, circular),
+                [2.0]
+            );
+        }
+        // A plateau at an open end peaks there
+        assert_eq!(
+            find_peaks(&[3.0, 3.0, 1.0, 0.0, 1.0, 2.0], &angles, 5, false),
+            [0.5, 5.0]
+        );
+    }
+
+    /// On the circle a plateau may wrap from the last grid point to the first.
+    #[test]
+    fn find_peaks_plateau_wraps_around() {
+        let angles = [0.0, 1.0, 2.0, 3.0, 4.0, 5.0];
+        // Indices 5, 0, 1: the midpoint is index 0
+        assert_eq!(
+            find_peaks(&[3.0, 3.0, 1.0, 0.0, 1.0, 3.0], &angles, 5, true),
+            [0.0]
+        );
+        // Indices 5, 0: the midpoint lies between the last and the first grid point
+        assert_eq!(
+            find_peaks(&[3.0, 1.0, 0.0, 0.0, 1.0, 3.0], &angles, 5, true),
+            [5.5]
+        );
+        // Open range: the same scores are two separate end peaks
+        assert_eq!(
+            find_peaks(&[3.0, 1.0, 0.0, 0.0, 1.0, 3.0], &angles, 5, false),
+            [0.0, 5.0]
+        );
+    }
+
+    #[test]
+    fn find_peaks_constant_spectrum_has_no_peak() {
+        let angles = [0.0, 1.0, 2.0];
+        for circular in [false, true] {
+            assert!(find_peaks(&[2.0; 3], &angles, 1, circular).is_empty());
+        }
     }
 
     #[test]

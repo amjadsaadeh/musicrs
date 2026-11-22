@@ -145,3 +145,42 @@ fn pentagon_array_three_sources() {
 fn estimate_doa_from_real_rejects_wrong_row_count() {
     square_array().estimate_doa_from_real(&DMatrix::zeros(3, 100), 1, 1000.0);
 }
+
+/// The Kinect line array's spectrum is mirror-symmetric (θ ≡ 360° − θ). A source at
+/// endfire that falls between two grid points therefore scores exactly the same on both,
+/// and must still be found, at the midpoint between them.
+#[test]
+fn line_array_endfire_between_grid_points() {
+    let half_step = 0.25_f64.to_radians();
+    let cases = [
+        // 719 steps: 180° lies midway between two grid points
+        (
+            MusicEstimator {
+                angle_steps_num: 719,
+                ..MusicEstimator::default()
+            },
+            180.0,
+        ),
+        // Grid shifted by half a step: 0° lies midway between -0.25° and 0.25°
+        (
+            MusicEstimator {
+                search_interval: (-half_step, 2.0 * PI - half_step),
+                ..MusicEstimator::default()
+            },
+            0.0,
+        ),
+    ];
+    let freq = 1000.0;
+    for (est, doa_deg) in cases {
+        let doa = f64::to_radians(doa_deg);
+        let data = DMatrix::from_fn(4, 4000, |m, t| {
+            let p = est.antenna_positions[m];
+            (2.0 * PI * freq * (t as f64 / SAMPLE_RATE + advance(p, doa))).cos()
+        });
+        assert_angles(
+            &est.estimate_doa_from_real(&data, 1, freq),
+            &[doa_deg],
+            0.01,
+        );
+    }
+}
