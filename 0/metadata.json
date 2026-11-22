@@ -1,0 +1,66 @@
+{
+  "cli_version": "0.13.4",
+  "checkpoint_id": "01M81YZYAC8SNGQG0H6525BD5T",
+  "session_id": "860b07ee-3f92-4815-ab52-690d0ae10c8e",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-22T15:46:37.630999845Z",
+  "branch": "fix/fft-planner-reuse",
+  "checkpoints_count": 3,
+  "files_touched": [
+    "src/music.rs",
+    "src/stft.rs"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-opus-5-5",
+  "turn_id": "57c2c32a9957",
+  "checkpoint_transcript_start": 1152,
+  "transcript_lines_at_start": 1152,
+  "compact_transcript_start": 86,
+  "token_usage": {
+    "input_tokens": 0,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 0,
+    "output_tokens": 0,
+    "api_call_count": 0,
+    "subagent_tokens": {
+      "input_tokens": 2,
+      "cache_creation_tokens": 1774,
+      "cache_read_tokens": 52517,
+      "output_tokens": 1046,
+      "api_call_count": 1
+    },
+    "subagent_tokens_complete": true
+  },
+  "session_token_usage": {
+    "input_tokens": 56,
+    "cache_creation_tokens": 96818,
+    "cache_read_tokens": 2050655,
+    "output_tokens": 24882,
+    "api_call_count": 24,
+    "subagent_tokens": {
+      "input_tokens": 294,
+      "cache_creation_tokens": 415361,
+      "cache_read_tokens": 6418400,
+      "output_tokens": 44360,
+      "api_call_count": 140
+    },
+    "subagent_tokens_complete": true
+  },
+  "redaction": {
+    "replacements": 42,
+    "layers": {
+      "betterleaks": 0,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 42,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "session_metrics": {
+    "turn_count": 5
+  }
+}
