@@ -126,8 +126,8 @@ fn narrowband_spectrum(est: &MusicEstimator, stem: &str, freq: f64) -> (Vec<f64>
         .collect();
     let x = DMatrix::from_fn(data.nrows(), data.ncols(), |m, t| analytic[m][t]);
     let cov = (&x * x.adjoint()).scale(1.0 / data.ncols() as f64);
-    let noise = est.noise_subspace(&cov, 1);
-    est.spectrum(&noise, freq)
+    let noise = est.noise_subspace(&cov, 1).unwrap();
+    est.spectrum(&noise, freq).unwrap()
 }
 
 #[test]
@@ -146,7 +146,9 @@ fn ifb_spectrum_matches_pymusic() {
         let (_, data) =
             common::read_wav_4ch(&Path::new(common::DATA_DIR).join(format!("{stem}.wav")));
         let bin = (freq * NFFT as f64 / est.sample_rate).round() as usize;
-        let (spectrum, angles) = est.ifb_music_spectrum(&data, NFFT, 1, Some(&[bin]));
+        let (spectrum, angles) = est
+            .ifb_music_spectrum(&data, NFFT, 1, Some(&[bin]))
+            .unwrap();
         check(
             &format!("{stem}.ifb_nfft{NFFT}_bin{bin}"),
             &angles,
@@ -172,7 +174,7 @@ fn ifb_multi_bin_spectrum_matches_pymusic() {
             .iter()
             .map(|&f| f as usize * NFFT / est.sample_rate as usize)
             .collect();
-        let (spectrum, angles) = est.ifb_music_spectrum(&data, NFFT, 1, Some(&bins));
+        let (spectrum, angles) = est.ifb_music_spectrum(&data, NFFT, 1, Some(&bins)).unwrap();
         let tones: Vec<String> = freqs.iter().map(u32::to_string).collect();
         let bin_names: Vec<String> = bins.iter().map(usize::to_string).collect();
         check(

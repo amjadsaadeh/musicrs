@@ -48,7 +48,7 @@ fn main() {
         (
             "narrowband",
             Box::new(|est, d| {
-                black_box(est.estimate_doa_from_real(d, 1, FREQ as f64));
+                black_box(est.estimate_doa_from_real(d, 1, FREQ as f64).unwrap());
             }),
             &["1.0", "2.0"],
             1000,
@@ -56,7 +56,7 @@ fn main() {
         (
             "ifb_one_bin",
             Box::new(move |est, d| {
-                black_box(est.ifb_music_spectrum(d, NFFT, 1, Some(&one_bin)));
+                black_box(est.ifb_music_spectrum(d, NFFT, 1, Some(&one_bin)).unwrap());
             }),
             &["1.0", "2.0"],
             1000,
@@ -64,7 +64,7 @@ fn main() {
         (
             "ifb_all_bins",
             Box::new(move |est, d| {
-                black_box(est.ifb_music_spectrum(d, NFFT, 1, Some(&all_bins)));
+                black_box(est.ifb_music_spectrum(d, NFFT, 1, Some(&all_bins)).unwrap());
             }),
             &["1.0"],
             1000,

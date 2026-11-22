@@ -27,15 +27,18 @@
 //! });
 //!
 //! // Analytic signal per channel, covariance, noise subspace, pseudo-spectrum, peaks:
-//! let angles = estimator.estimate_doa_from_real(&real_data, 1, 300.0);
+//! let angles = estimator.estimate_doa_from_real(&real_data, 1, 300.0)?;
 //! println!("DOA estimate: {:.1}°", angles[0].to_degrees());
+//! # Ok::<(), musicrs::MusicError>(())
 //! ```
 //!
 //! Use [`MusicEstimator::estimate_doa`] directly if you already have complex data, and
 //! [`MusicEstimator::ifb_music_spectrum`] for the wideband (IFB) variant.
 
+pub mod error;
 pub mod music;
 pub mod stft;
 
+pub use error::{MusicError, Result};
 pub use music::{MusicEstimator, select_bins_by_energy};
 pub use stft::{analytic_signal, stft};

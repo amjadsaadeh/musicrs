@@ -23,7 +23,9 @@ fn test_single_source_doa() {
         let (sample_rate, real_data) = common::read_wav_4ch(&path);
         assert_eq!(sample_rate as f64, estimator.sample_rate);
 
-        let estimate = estimator.estimate_doa_from_real(&real_data, 1, meta.frequency_hz);
+        let estimate = estimator
+            .estimate_doa_from_real(&real_data, 1, meta.frequency_hz)
+            .unwrap();
         let truths =
             common::equivalent_angles(meta.doa_deg, meta.frequency_hz, estimator.sample_rate);
         let error = estimate.first().map_or(f64::INFINITY, |a| {
@@ -53,7 +55,9 @@ fn endfire_recordings_on_grid_straddling_zero() {
             continue;
         }
         let (_, real_data) = common::read_wav_4ch(&path);
-        let estimate = estimator.estimate_doa_from_real(&real_data, 1, meta.frequency_hz);
+        let estimate = estimator
+            .estimate_doa_from_real(&real_data, 1, meta.frequency_hz)
+            .unwrap();
         let error = estimate.first().map_or(f64::INFINITY, |a| {
             common::angular_error(a.to_degrees(), &[0.0])
         });
@@ -61,4 +65,23 @@ fn endfire_recordings_on_grid_straddling_zero() {
     }
 
     log.check(1e-9);
+}
+
+/// `estimate_doa_from_real` removes each channel's mean, so a DC offset, even one as
+/// large as the tone and different on every microphone, does not move the estimate.
+/// Before, an offset equal to the tone's amplitude pulled 40° to 337°.
+#[test]
+fn dc_offset_does_not_move_estimate() {
+    let estimator = MusicEstimator::default();
+    let (_, clean) = common::read_wav_4ch(&common::wav_path(1400, 40, "1.0s"));
+    let amplitude = clean.iter().fold(0.0_f64, |a, &x| a.max(x.abs()));
+    let mut offset = clean.clone();
+    for (m, mut row) in offset.row_iter_mut().enumerate() {
+        row.add_scalar_mut(amplitude * (1.0 - 0.3 * m as f64));
+    }
+    let expected = estimator.estimate_doa_from_real(&clean, 1, 1400.0).unwrap();
+    let got = estimator
+        .estimate_doa_from_real(&offset, 1, 1400.0)
+        .unwrap();
+    assert_eq!(got, expected);
 }

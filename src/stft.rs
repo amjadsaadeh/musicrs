@@ -3,6 +3,8 @@
 use num_complex::Complex;
 use rustfft::FftPlanner;
 
+use crate::error::{MusicError, Result};
+
 /// Computes the analytic signal of a real-valued input using the Hilbert transform.
 ///
 /// The analytic signal `z(t) = x(t) + j·H{x(t)}` has a one-sided spectrum; its magnitude is the
@@ -64,8 +66,14 @@ pub fn analytic_signal(data: &[f64]) -> Vec<Complex<f64>> {
 ///
 /// # Arguments
 /// * `data`       – Real-valued input samples.
-/// * `nfft`       – Window (FFT) size. Must be ≥ 1.
+/// * `nfft`       – Window (FFT) size.
 /// * `no_overlap` – Number of samples shared between consecutive windows.
+///
+/// Data shorter than `nfft` gives `nfft / 2 + 1` empty bins.
+///
+/// # Errors
+/// [`MusicError::InvalidNfft`] if `nfft` is 0, [`MusicError::InvalidOverlap`] if
+/// `no_overlap >= nfft`.
 ///
 /// # Examples
 /// ```
@@ -77,13 +85,17 @@ pub fn analytic_signal(data: &[f64]) -> Vec<Complex<f64>> {
 /// let sine: Vec<f64> = (0..n)
 ///     .map(|i| (2.0 * PI * freq_bin as f64 * i as f64 / sr).sin())
 ///     .collect();
-/// let result = stft(&sine, 64, 0);
+/// let result = stft(&sine, 64, 0).unwrap();
 /// // Each window should have a peak at `freq_bin` (relative to the window size)
 /// assert!(!result.is_empty());
 /// ```
-pub fn stft(data: &[f64], nfft: usize, no_overlap: usize) -> Vec<Vec<Complex<f64>>> {
-    assert!(nfft >= 1, "nfft must be at least 1");
-    assert!(no_overlap < nfft, "no_overlap must be less than nfft");
+pub fn stft(data: &[f64], nfft: usize, no_overlap: usize) -> Result<Vec<Vec<Complex<f64>>>> {
+    if nfft == 0 {
+        return Err(MusicError::InvalidNfft);
+    }
+    if no_overlap >= nfft {
+        return Err(MusicError::InvalidOverlap { no_overlap, nfft });
+    }
 
     let step = nfft - no_overlap;
     let freq_bins = nfft / 2 + 1;
@@ -113,7 +125,7 @@ pub fn stft(data: &[f64], nfft: usize, no_overlap: usize) -> Vec<Vec<Complex<f64
         }
     }
 
-    result
+    Ok(result)
 }
 
 #[cfg(test)]
@@ -208,20 +220,24 @@ mod tests {
         let overlap = 8;
         let step = nfft - overlap; // 8
         let expected_windows = (data.len() - nfft) / step + 1; // (100 - 16) / 8 + 1 = 11
-        let result = stft(&data, nfft, overlap);
+        let result = stft(&data, nfft, overlap).unwrap();
         assert_eq!(result[0].len(), expected_windows);
     }
 
     #[test]
-    #[should_panic(expected = "nfft must be at least 1")]
     fn stft_rejects_zero_nfft() {
-        stft(&[0.0; 8], 0, 0);
+        assert_eq!(stft(&[0.0; 8], 0, 0), Err(MusicError::InvalidNfft));
     }
 
     #[test]
-    #[should_panic(expected = "no_overlap must be less than nfft")]
     fn stft_rejects_overlap_of_whole_window() {
-        stft(&[0.0; 8], 4, 4);
+        assert_eq!(
+            stft(&[0.0; 8], 4, 4),
+            Err(MusicError::InvalidOverlap {
+                no_overlap: 4,
+                nfft: 4
+            })
+        );
     }
 
     /// With overlap, window w starts at sample w·(nfft − no_overlap): its DC bin is the sum
@@ -230,7 +246,7 @@ mod tests {
     fn stft_overlapping_windows_start_at_step() {
         let data: Vec<f64> = (0..20).map(f64::from).collect();
         let (nfft, overlap) = (8, 5);
-        let result = stft(&data, nfft, overlap);
+        let result = stft(&data, nfft, overlap).unwrap();
         assert_eq!(result[0].len(), 5); // (20 − 8) / 3 + 1
         for (w, dc) in result[0].iter().enumerate() {
             let start = w * (nfft - overlap);
@@ -245,7 +261,7 @@ mod tests {
     fn stft_freq_bins() {
         let data = vec![0.0f64; 64];
         let nfft = 32;
-        let result = stft(&data, nfft, 0);
+        let result = stft(&data, nfft, 0).unwrap();
         assert_eq!(result.len(), nfft / 2 + 1);
     }
 
@@ -259,7 +275,7 @@ mod tests {
         let data: Vec<f64> = (0..n)
             .map(|i| (2.0 * PI * target_bin as f64 * i as f64 / nfft as f64).sin())
             .collect();
-        let result = stft(&data, nfft, 0);
+        let result = stft(&data, nfft, 0).unwrap();
         // In each window, bin `target_bin` should dominate
         for win in 0..result[0].len() {
             let peak_bin = (0..result.len())

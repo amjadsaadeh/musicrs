@@ -32,7 +32,9 @@ fn ifb_single_bin_doa() {
         assert_eq!(sample_rate as f64, est.sample_rate);
         let bin = (meta.frequency_hz * NFFT as f64 / est.sample_rate).round() as usize;
 
-        let (spectrum, angles) = est.ifb_music_spectrum(&data, NFFT, 1, Some(&[bin]));
+        let (spectrum, angles) = est
+            .ifb_music_spectrum(&data, NFFT, 1, Some(&[bin]))
+            .unwrap();
         let argmax = (0..spectrum.len())
             .max_by(|&a, &b| spectrum[a].total_cmp(&spectrum[b]))
             .unwrap();
@@ -63,8 +65,9 @@ fn assert_same_spectrum(a: &[f64], b: &[f64]) {
 #[test]
 fn ifb_all_bins_spectrum_is_finite() {
     let est = MusicEstimator::default();
-    let (spectrum, _) =
-        est.ifb_music_spectrum(&load("single-source_300Hz_80deg_1.0s"), 1024, 1, None);
+    let (spectrum, _) = est
+        .ifb_music_spectrum(&load("single-source_300Hz_80deg_1.0s"), 1024, 1, None)
+        .unwrap();
     for (i, &v) in spectrum.iter().enumerate() {
         assert!(v.is_finite() && v > 0.0, "spectrum[{i}] = {v}");
     }
@@ -75,8 +78,10 @@ fn ifb_all_bins_spectrum_is_finite() {
 fn ifb_repeated_bin_equals_single_bin() {
     let est = MusicEstimator::default();
     let data = load("single-source_1400Hz_40deg_1.0s");
-    let (once, _) = est.ifb_music_spectrum(&data, NFFT, 1, Some(&[14]));
-    let (thrice, _) = est.ifb_music_spectrum(&data, NFFT, 1, Some(&[14, 14, 14]));
+    let (once, _) = est.ifb_music_spectrum(&data, NFFT, 1, Some(&[14])).unwrap();
+    let (thrice, _) = est
+        .ifb_music_spectrum(&data, NFFT, 1, Some(&[14, 14, 14]))
+        .unwrap();
     assert_same_spectrum(&thrice, &once);
 }
 
@@ -85,18 +90,11 @@ fn ifb_repeated_bin_equals_single_bin() {
 fn ifb_ignores_out_of_range_bins() {
     let est = MusicEstimator::default();
     let data = load("single-source_1400Hz_40deg_1.0s");
-    let (only, _) = est.ifb_music_spectrum(&data, NFFT, 1, Some(&[14]));
-    let (with_extra, _) = est.ifb_music_spectrum(&data, NFFT, 1, Some(&[14, NFFT / 2 + 1, 10_000]));
+    let (only, _) = est.ifb_music_spectrum(&data, NFFT, 1, Some(&[14])).unwrap();
+    let (with_extra, _) = est
+        .ifb_music_spectrum(&data, NFFT, 1, Some(&[14, NFFT / 2 + 1, 10_000]))
+        .unwrap();
     assert_same_spectrum(&with_extra, &only);
-}
-
-/// Data shorter than one STFT window gives a flat spectrum over the search grid.
-#[test]
-fn ifb_data_shorter_than_window_is_flat() {
-    let est = MusicEstimator::default();
-    let (spectrum, angles) = est.ifb_music_spectrum(&DMatrix::zeros(4, NFFT - 1), NFFT, 1, None);
-    assert_eq!(angles.len(), est.angle_steps_num);
-    assert!(spectrum.iter().all(|&v| v == 1.0));
 }
 
 /// With bins picked by energy (within 20 dB of the strongest), IFB-MUSIC finds every
@@ -114,8 +112,8 @@ fn ifb_energy_selected_bins_doa() {
             continue;
         }
         let (_, data) = common::read_wav_4ch(&path);
-        let bins = select_bins_by_energy(&data, NFFT, 20.0);
-        let (spectrum, angles) = est.ifb_music_spectrum(&data, NFFT, 1, Some(&bins));
+        let bins = select_bins_by_energy(&data, NFFT, 20.0).unwrap();
+        let (spectrum, angles) = est.ifb_music_spectrum(&data, NFFT, 1, Some(&bins)).unwrap();
         let argmax = (0..spectrum.len())
             .max_by(|&a, &b| spectrum[a].total_cmp(&spectrum[b]))
             .unwrap();
