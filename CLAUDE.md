@@ -98,6 +98,7 @@ Test data covers:
   - `fix/<bugfix-name>` for bug fixes
 - Structure work in reasonably sized commits: each commit is one logical change that builds and passes tests on its own.
 - A project Stop hook (`.claude/settings.json` → `.claude/hooks/run-tests.sh`) runs `cargo test` when a turn ends with changed code under `src/`, `tests/` or `Cargo.*`, and sends failures back to Claude. Tests that take more than ~10 s are marked `#[ignore = "slow"]`, so the hook skips them; run `cargo test -- --include-ignored` for the full suite. Set `MUSICRS_SKIP_HOOK_TESTS=1` before starting Claude Code to turn the hook off.
+- Parallel builds (subagents in separate worktrees, or a second `cargo test` next to the Stop hook) must not share a Cargo target directory. Worktrees of this crate produce the same test-binary paths (e.g. `target/debug/deps/noisy_data_test-<hash>`), and cargo releases its build lock before running the tests, so one run can execute another worktree's binary: tests go missing or fail on code that isn't there, or a binary being rewritten fails with "Permission denied". Give each worktree its own `CARGO_TARGET_DIR` (on this 3-core machine also `CARGO_BUILD_JOBS=1`), and check that new tests appear by name in the output before trusting a run.
 
 ## Notes
 
