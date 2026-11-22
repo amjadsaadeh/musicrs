@@ -95,7 +95,9 @@ fn run_noisy_doa_test(snr_db: f64, tolerance_deg: f64) {
         let seed = (snr_db as u64).wrapping_mul(1_000) ^ (file_idx as u64).wrapping_mul(7_919);
         let noisy = add_white_noise(&real_data, snr_db, seed);
 
-        let estimate = estimator.estimate_doa_from_real(&noisy, 1, meta.frequency_hz);
+        let estimate = estimator
+            .estimate_doa_from_real(&noisy, 1, meta.frequency_hz)
+            .unwrap();
         let truths =
             common::equivalent_angles(meta.doa_deg, meta.frequency_hz, estimator.sample_rate);
         let error = estimate.first().map_or(f64::INFINITY, |a| {

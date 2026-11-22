@@ -28,12 +28,14 @@ cargo doc --open
 ```
 src/
 ├── lib.rs      # Public API exports and crate-level docs
+├── error.rs    # MusicError (returned by every fallible public function) and Result alias
 ├── music.rs    # Core MUSIC algorithm (MusicEstimator, spectrum, DOA estimation)
 └── stft.rs     # Signal processing (STFT, analytic signal via Hilbert transform)
 tests/
 ├── common/mod.rs                # Shared WAV/filename/angle helpers, ErrorLog
 ├── integration_test.rs          # Narrowband DOA on every WAV recording (±0.5°)
 ├── ifb_test.rs                  # IFB-MUSIC on the tone's bin (nfft 160), below Nyquist (±0.5°)
+├── errors_test.rs               # Every MusicError the public API returns
 ├── golden_test.rs               # Spectra vs. pyMUSIC output; musicrs snapshots at/above Nyquist
 ├── broadband_test.rs            # IFB-MUSIC on composite multi-tone signals
 ├── noisy_data_test.rs           # Narrowband DOA with added white noise
@@ -47,11 +49,13 @@ docs/benchmark*.svg              # charts shown in the README (light and dark), 
 
 **Key types:**
 - `MusicEstimator` — main struct; configure antenna positions, angle search range/step, sample rate, and number of sources
-- `MusicEstimator::estimate_doa_from_real()` — real-data entry point (analytic signal per channel, then `estimate_doa`), like pyMUSIC's `getSourceAngles`
+- `MusicEstimator::estimate_doa_from_real()` — real-data entry point (removes each channel's mean, analytic signal per channel, then `estimate_doa`), like pyMUSIC's `getSourceAngles`
 - `MusicEstimator::ifb_music_spectrum()` — wideband variant; bin frequencies use the estimator's `sample_rate`, so tones above Nyquist cannot be recovered
 - `select_bins_by_energy()` — picks the IFB bins within N dB of the strongest; with `bins = None` noise-only bins dominate the geometric mean
 - `analytic_signal()` — converts real signal to complex via Hilbert transform (FFT-based)
 - `stft()` — Short-Time Fourier Transform with configurable window and overlap
+
+- `MusicError` — bad data (wrong row count, no samples, NaN/inf, silence) and bad parameters (too many sources, `nfft`, overlap, threshold, no usable bins) are returned as `Err`; the public API does not panic on them
 
 **Core algorithm flow:**
 1. Compute covariance matrix of complex multichannel input

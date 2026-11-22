@@ -30,11 +30,14 @@ let estimator = MusicEstimator::default();
 let data: DMatrix<f64> = /* ... */;
 
 // Narrowband DOA of one 1400 Hz source, in radians
-let angles = estimator.estimate_doa_from_real(&data, 1, 1400.0);
+let angles = estimator.estimate_doa_from_real(&data, 1, 1400.0)?;
 
 // Wideband: IFB-MUSIC spectrum over chosen STFT bins (nfft = 160 → 100 Hz bins)
-let (spectrum, angles) = estimator.ifb_music_spectrum(&data, 160, 1, Some(&[14]));
+let (spectrum, angles) = estimator.ifb_music_spectrum(&data, 160, 1, Some(&[14]))?;
 ```
+
+Bad input (wrong channel count, NaN, silence, too many sources, an unusable angle grid, …)
+is returned as a `MusicError`.
 
 For other arrays use `MusicEstimator::new(antenna_positions, angle_steps_num, search_interval,
 sample_rate)` with `[x, y]` positions in metres. If you already have complex (analytic) data,
