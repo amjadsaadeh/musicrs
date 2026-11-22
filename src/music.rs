@@ -347,9 +347,11 @@ impl MusicEstimator {
     /// * `search_interval`   – `(start_rad, end_rad)` search range.
     /// * `sample_rate`       – Sample rate in Hz (used for aliasing-aware steering).
     ///
-    /// The angle grid is not checked here, because the fields are public and can change
-    /// later: the methods that search the grid return [`MusicError::InvalidAngleGrid`]
-    /// unless `angle_steps_num > 0` and `search_interval` is finite with `start < end`.
+    /// Nothing is checked here, because the fields are public and can change later. The
+    /// methods that use them return [`MusicError::InvalidAngleGrid`] unless
+    /// `angle_steps_num > 0` and `search_interval` is finite with `start < end` and spans
+    /// at most 2π, [`MusicError::InvalidSampleRate`] unless `sample_rate` is finite and
+    /// positive, and [`MusicError::InvalidAntennaPosition`] for a NaN or infinite position.
     pub fn new(
         antenna_positions: Vec<[f64; 2]>,
         angle_steps_num: usize,
@@ -382,7 +384,10 @@ impl MusicEstimator {
     fn angle_grid(&self) -> Result<Vec<f64>> {
         let (start, end) = self.search_interval;
         let steps = self.angle_steps_num;
-        if steps == 0 || !(start.is_finite() && end.is_finite() && start < end) {
+        let usable = start.is_finite() && end.is_finite() && start < end;
+        // A span of more than 2π (beyond the tolerance of `covers_full_circle`) would
+        // visit some directions twice and report one source as two.
+        if steps == 0 || !usable || end - start > 2.0 * PI + 1e-9 {
             return Err(MusicError::InvalidAngleGrid {
                 angle_steps_num: steps,
                 search_interval: self.search_interval,
@@ -393,6 +398,22 @@ impl MusicEstimator {
             .collect())
     }
 
+    /// Checks the fields the steering vectors are built from: a finite, positive
+    /// `sample_rate` and finite antenna positions.
+    fn check_array(&self) -> Result<()> {
+        if !(self.sample_rate.is_finite() && self.sample_rate > 0.0) {
+            return Err(MusicError::InvalidSampleRate(self.sample_rate));
+        }
+        match self
+            .antenna_positions
+            .iter()
+            .position(|p| !(p[0].is_finite() && p[1].is_finite()))
+        {
+            Some(index) => Err(MusicError::InvalidAntennaPosition { index }),
+            None => Ok(()),
+        }
+    }
+
     fn check_rows(&self, got: usize) -> Result<()> {
         if got == self.n_antennas() {
             Ok(())
@@ -401,6 +422,15 @@ impl MusicEstimator {
                 expected: self.n_antennas(),
                 got,
             })
+        }
+    }
+
+    /// Checks that a signal frequency is finite and positive.
+    fn check_frequency(frequency: f64) -> Result<()> {
+        if frequency.is_finite() && frequency > 0.0 {
+            Ok(())
+        } else {
+            Err(MusicError::InvalidFrequency(frequency))
         }
     }
 
@@ -479,6 +509,9 @@ impl MusicEstimator {
     /// * `cov`       – Hermitian covariance matrix (n_antennas × n_antennas).
     /// * `n_sources` – Number of signal sources (must be < n_antennas).
     ///
+    /// `cov` is assumed to be Hermitian, as every covariance matrix is: only its lower
+    /// triangle (diagonal included) is read.
+    ///
     /// # Errors
     /// [`MusicError::CovarianceShape`] if `cov` is not n_antennas × n_antennas,
     /// [`MusicError::NonFiniteData`] if it contains NaN or infinity, and
@@ -518,10 +551,14 @@ impl MusicEstimator {
     /// `(spectrum, angles)` — corresponding vectors of the same length.
     ///
     /// # Errors
-    /// [`MusicError::RowCountMismatch`] if `noise_mat` does not have one row per antenna,
-    /// [`MusicError::InvalidAngleGrid`] if the angle grid is unusable (see [`new`](Self::new)).
+    /// - [`MusicError::RowCountMismatch`] if `noise_mat` does not have one row per antenna.
+    /// - [`MusicError::InvalidFrequency`] unless `frequency` is finite and positive.
+    /// - [`MusicError::InvalidAngleGrid`], [`MusicError::InvalidSampleRate`] or
+    ///   [`MusicError::InvalidAntennaPosition`] for an unusable estimator (see [`new`](Self::new)).
     pub fn spectrum(&self, noise_mat: &CMatrix, frequency: f64) -> Result<(Vec<f64>, Vec<f64>)> {
         self.check_rows(noise_mat.nrows())?;
+        self.check_array()?;
+        Self::check_frequency(frequency)?;
         let angles = self.angle_grid()?;
         let scores: Vec<f64> = angles
             .iter()
@@ -555,7 +592,9 @@ impl MusicEstimator {
     /// - [`MusicError::EmptyData`] if it has no samples, [`MusicError::NonFiniteData`]
     ///   if it contains NaN or infinity, [`MusicError::SilentData`] if it is all zeros.
     /// - [`MusicError::TooManySources`] if `n_sources >= n_antennas`.
-    /// - [`MusicError::InvalidAngleGrid`] if the angle grid is unusable (see [`new`](Self::new)).
+    /// - [`MusicError::InvalidFrequency`] unless `frequency` is finite and positive.
+    /// - [`MusicError::InvalidAngleGrid`], [`MusicError::InvalidSampleRate`] or
+    ///   [`MusicError::InvalidAntennaPosition`] for an unusable estimator (see [`new`](Self::new)).
     pub fn estimate_doa(
         &self,
         data: &CMatrix,
@@ -564,6 +603,8 @@ impl MusicEstimator {
     ) -> Result<Vec<f64>> {
         self.check_rows(data.nrows())?;
         self.check_sources(n_sources)?;
+        self.check_array()?;
+        Self::check_frequency(frequency)?;
         if data.ncols() == 0 {
             return Err(MusicError::EmptyData);
         }
@@ -633,6 +674,9 @@ impl MusicEstimator {
         frequency: f64,
     ) -> Result<Vec<f64>> {
         self.check_rows(data.nrows())?;
+        self.check_sources(n_sources)?;
+        self.check_array()?;
+        Self::check_frequency(frequency)?;
         check_real_samples(data)?;
         let data = &normalised_real(data);
         let mut complex = CMatrix::zeros(data.nrows(), data.ncols());
@@ -662,7 +706,8 @@ impl MusicEstimator {
     /// * `nfft`          – STFT window size.
     /// * `n_sources`     – Number of sources.
     /// * `bins`          – Frequency bin indices to use; `None` uses all bins except DC.
-    ///   Bins at or above `nfft / 2 + 1` are ignored, and so are bins with no power.
+    ///   The DC bin 0 (it has no direction information), bins at or above `nfft / 2 + 1`
+    ///   and bins with no power are ignored.
     ///
     /// Bin frequencies are derived from [`MusicEstimator::sample_rate`], the same rate
     /// [`steering_vector`](Self::steering_vector) uses for its Nyquist handling.
@@ -678,9 +723,11 @@ impl MusicEstimator {
     ///   [`MusicError::DataShorterThanWindow`] if it has no complete STFT window.
     /// - [`MusicError::InvalidNfft`] if `nfft` is 0.
     /// - [`MusicError::TooManySources`] if `n_sources >= n_antennas`.
-    /// - [`MusicError::NoUsableBins`] if none of the bins exists (for `None`: `nfft` is 1).
+    /// - [`MusicError::NoUsableBins`] if none of the bins is in `1..=nfft / 2` (for `None`:
+    ///   `nfft` is 1).
     /// - [`MusicError::SilentData`] if no usable bin has power.
-    /// - [`MusicError::InvalidAngleGrid`] if the angle grid is unusable (see [`new`](Self::new)).
+    /// - [`MusicError::InvalidAngleGrid`], [`MusicError::InvalidSampleRate`] or
+    ///   [`MusicError::InvalidAntennaPosition`] for an unusable estimator (see [`new`](Self::new)).
     pub fn ifb_music_spectrum(
         &self,
         data: &DMatrix<f64>,
@@ -691,6 +738,7 @@ impl MusicEstimator {
         self.check_rows(data.nrows())?;
         check_real_samples(data)?;
         self.check_sources(n_sources)?;
+        self.check_array()?;
         if nfft == 0 {
             return Err(MusicError::InvalidNfft);
         }
@@ -709,7 +757,7 @@ impl MusicEstimator {
             .unwrap_or(&default_bins)
             .iter()
             .copied()
-            .filter(|&bin| bin < freq_bins)
+            .filter(|bin| (1..freq_bins).contains(bin))
             .collect();
         if active_bins.is_empty() {
             return Err(MusicError::NoUsableBins);
@@ -1060,6 +1108,24 @@ mod tests {
                 assert_abs_diff_eq!(g[(i, j)].im, 0.0, epsilon = 1e-9);
             }
         }
+    }
+
+    /// Only the lower triangle of `cov` is read: changing the strict upper triangle
+    /// leaves the noise subspace unchanged.
+    #[test]
+    fn noise_subspace_reads_only_lower_triangle() {
+        let est = default_est();
+        let cov = dense_hermitian();
+        let mut garbled = cov.clone();
+        for i in 0..4 {
+            for j in i + 1..4 {
+                garbled[(i, j)] = Cplx::new(7.0 * i as f64, -3.0 * j as f64);
+            }
+        }
+        assert_eq!(
+            est.noise_subspace(&garbled, 1).unwrap(),
+            est.noise_subspace(&cov, 1).unwrap()
+        );
     }
 
     // ── spectrum ──────────────────────────────────────────────────────────────
