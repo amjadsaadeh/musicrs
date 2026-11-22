@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "repl_e915785e-d137-4114-92da-62b9c837ac4b",
+  "agent_id": "a0471f544960c08fb",
+  "subagent_type": "general-purpose",
+  "task_description": "reuse fft planners",
+  "token_usage": {
+    "input_tokens": 42,
+    "cache_creation_tokens": 58138,
+    "cache_read_tokens": 915353,
+    "output_tokens": 7306,
+    "api_call_count": 64
+  },
+  "started_at": "2026-11-22T15:55:58.692262162+01:00",
+  "completed_at": "2026-11-22T16:55:31.90038236+01:00"
+}
