@@ -30,11 +30,19 @@ use crate::error::{MusicError, Result};
 /// }
 /// ```
 pub fn analytic_signal(data: &[f64]) -> Vec<Complex<f64>> {
+    analytic_signal_with(data, &mut FftPlanner::new())
+}
+
+/// [`analytic_signal`] with a caller-owned planner, so that several signals of the same
+/// length (one per channel) share its cached FFT plans instead of rebuilding them.
+pub(crate) fn analytic_signal_with(
+    data: &[f64],
+    planner: &mut FftPlanner<f64>,
+) -> Vec<Complex<f64>> {
     let n = data.len();
     if n == 0 {
         return Vec::new();
     }
-    let mut planner = FftPlanner::<f64>::new();
 
     // Forward FFT
     let fft_forward = planner.plan_fft_forward(n);
@@ -98,6 +106,17 @@ pub fn analytic_signal(data: &[f64]) -> Vec<Complex<f64>> {
 /// # Ok::<(), musicrs::MusicError>(())
 /// ```
 pub fn stft(data: &[f64], nfft: usize, no_overlap: usize) -> Result<Vec<Vec<Complex<f64>>>> {
+    stft_with(data, nfft, no_overlap, &mut FftPlanner::new())
+}
+
+/// [`stft`] with a caller-owned planner, so that several signals (one per channel) share
+/// its cached FFT plan instead of rebuilding it.
+pub(crate) fn stft_with(
+    data: &[f64],
+    nfft: usize,
+    no_overlap: usize,
+    planner: &mut FftPlanner<f64>,
+) -> Result<Vec<Vec<Complex<f64>>>> {
     if nfft == 0 {
         return Err(MusicError::InvalidNfft);
     }
@@ -114,7 +133,6 @@ pub fn stft(data: &[f64], nfft: usize, no_overlap: usize) -> Result<Vec<Vec<Comp
 
     let step = nfft - no_overlap;
     let freq_bins = nfft / 2 + 1;
-    let mut planner = FftPlanner::<f64>::new();
     // Use real-to-complex FFT plan (standard forward FFT on real-padded input)
     let fft = planner.plan_fft_forward(nfft);
 
@@ -215,6 +233,21 @@ mod tests {
                     c.norm()
                 );
             }
+        }
+    }
+
+    /// A planner reused across signals gives bit-identical results to a fresh one per call.
+    #[test]
+    fn shared_planner_matches_fresh_planner() {
+        let mut planner = FftPlanner::new();
+        for seed in 0..3 {
+            let x = noise(255, 100 + seed);
+            assert_eq!(analytic_signal_with(&x, &mut planner), analytic_signal(&x));
+            assert_eq!(
+                stft_with(&x, 32, 8, &mut planner),
+                stft(&x, 32, 8),
+                "seed {seed}"
+            );
         }
     }
 

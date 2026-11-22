@@ -5,9 +5,10 @@ use std::f64::consts::PI;
 use nalgebra::DMatrix;
 use nalgebra::DVector;
 use num_complex::Complex;
+use rustfft::FftPlanner;
 
 use crate::error::{MusicError, Result};
-use crate::stft::{analytic_signal, stft};
+use crate::stft::{analytic_signal_with, stft_with};
 
 /// Speed of sound in air at ~20 °C, in metres per second.
 const SPEED_OF_SOUND: f64 = 343.2;
@@ -232,9 +233,13 @@ pub fn select_bins_by_energy(
     // overflow to infinity for very loud data (every bin selected).
     let data = &normalised_real(data);
     let mut power = vec![0.0; nfft / 2 + 1];
+    let mut planner = FftPlanner::new();
     for m in 0..data.nrows() {
         let row: Vec<f64> = data.row(m).iter().copied().collect();
-        for (p, bin) in power.iter_mut().zip(stft(&row, nfft, 0)?) {
+        for (p, bin) in power
+            .iter_mut()
+            .zip(stft_with(&row, nfft, 0, &mut planner)?)
+        {
             *p += bin.iter().map(|c| c.norm_sqr()).sum::<f64>() / bin.len() as f64;
         }
     }
@@ -695,12 +700,16 @@ impl MusicEstimator {
         let data = &normalised_real(data);
         let mut complex = CMatrix::zeros(data.nrows(), data.ncols());
         let (mut raw_energy, mut centred_energy) = (0.0, 0.0);
+        let mut planner = FftPlanner::new();
         for m in 0..data.nrows() {
             let mean = accurate_mean(data.row(m).iter());
             let row: Vec<f64> = data.row(m).iter().map(|x| x - mean).collect();
             raw_energy += data.row(m).norm_squared();
             centred_energy += row.iter().map(|x| x * x).sum::<f64>();
-            for (t, c) in analytic_signal(&row).into_iter().enumerate() {
+            for (t, c) in analytic_signal_with(&row, &mut planner)
+                .into_iter()
+                .enumerate()
+            {
                 complex[(m, t)] = c;
             }
         }
@@ -783,11 +792,12 @@ impl MusicEstimator {
             return Err(MusicError::NoUsableBins);
         }
 
-        // STFT per microphone channel
+        // STFT per microphone channel, all sharing one FFT plan
+        let mut planner = FftPlanner::new();
         let stfts: Vec<Vec<Vec<Cplx>>> = (0..n_mics)
             .map(|m| {
                 let row: Vec<f64> = data.row(m).iter().copied().collect();
-                stft(&row, nfft, 0)
+                stft_with(&row, nfft, 0, &mut planner)
             })
             .collect::<Result<_>>()?;
         let n_windows = stfts[0][0].len();
