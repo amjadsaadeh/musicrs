@@ -712,7 +712,8 @@ impl MusicEstimator {
     /// * `n_sources`     – Number of sources.
     /// * `bins`          – Frequency bin indices to use; `None` uses all bins except DC.
     ///   The DC bin 0 (it has no direction information), bins at or above `nfft / 2 + 1`
-    ///   and bins with no power are ignored.
+    ///   and bins with no power are ignored. Each bin counts once in the geometric mean,
+    ///   however often it is listed and in whatever order.
     ///
     /// Bin frequencies are derived from [`MusicEstimator::sample_rate`], the same rate
     /// [`steering_vector`](Self::steering_vector) uses for its Nyquist handling.
@@ -758,12 +759,16 @@ impl MusicEstimator {
         let freq_bins = nfft / 2 + 1;
 
         let default_bins: Vec<usize> = (1..freq_bins).collect();
-        let active_bins: Vec<usize> = bins
+        let mut active_bins: Vec<usize> = bins
             .unwrap_or(&default_bins)
             .iter()
             .copied()
             .filter(|bin| (1..freq_bins).contains(bin))
             .collect();
+        // A repeated bin would count more than once in the geometric mean; the order of the
+        // bins does not change the mean.
+        active_bins.sort_unstable();
+        active_bins.dedup();
         if active_bins.is_empty() {
             return Err(MusicError::NoUsableBins);
         }
@@ -783,20 +788,6 @@ impl MusicEstimator {
         let mut angles_out: Vec<f64> = Vec::new();
         let mut n_processed = 0usize;
 
-        // Cross-spectral matrix of each bin, averaged over time windows
-        let covs: Vec<(usize, CMatrix)> = active_bins
-            .into_iter()
-            .map(|bin| {
-                let bin_slices: Vec<&[Cplx]> = stfts.iter().map(|s| s[bin].as_slice()).collect();
-                let mut cov = CMatrix::zeros(n_mics, n_mics);
-                for col in (0..n_windows)
-                    .map(|w| CVec::from_iterator(n_mics, bin_slices.iter().map(|s| s[w])))
-                {
-                    cov += &col * col.adjoint();
-                }
-                (bin, cov.scale(1.0 / n_windows as f64))
-            })
-            .collect();
         // Silence is judged against the strongest bin of the whole spectrum, DC included,
         // so that a requested bin holding only rounding residue is still recognised.
         let strongest = stfts
@@ -810,7 +801,17 @@ impl MusicEstimator {
             .into_iter()
             .fold(0.0, f64::max);
 
-        for (bin, cov) in covs {
+        for bin in active_bins {
+            // Cross-spectral matrix of this bin, averaged over time windows. Built one bin
+            // at a time so that only one n_mics x n_mics matrix is alive at once.
+            let bin_slices: Vec<&[Cplx]> = stfts.iter().map(|s| s[bin].as_slice()).collect();
+            let mut cov = CMatrix::zeros(n_mics, n_mics);
+            for col in
+                (0..n_windows).map(|w| CVec::from_iterator(n_mics, bin_slices.iter().map(|s| s[w])))
+            {
+                cov += &col * col.adjoint();
+            }
+            let cov = cov.scale(1.0 / n_windows as f64);
             if cov.trace().re <= SILENCE_RATIO * strongest {
                 // No power in this bin: its noise subspace would be arbitrary.
                 continue;

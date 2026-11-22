@@ -34,7 +34,7 @@ src/
 tests/
 ├── common/mod.rs                # Shared WAV/filename/angle helpers, ErrorLog
 ├── integration_test.rs          # Narrowband DOA on every WAV recording (±0.5°)
-├── ifb_test.rs                  # IFB-MUSIC on the tone's bin (nfft 160), below Nyquist (±0.5°)
+├── ifb_test.rs                  # IFB-MUSIC on the tone's bin (nfft 160), below Nyquist (±0.5°); repeated and reordered bins
 ├── errors_test.rs               # Every MusicError the public API returns
 ├── golden_test.rs               # Spectra vs. pyMUSIC (incl. partial interval, 2 sources narrowband and IFB, nfft 320/1024); analytic signal vs. scipy; musicrs snapshots at/above Nyquist
 ├── broadband_test.rs            # IFB-MUSIC on composite multi-tone signals; two sources at different angles
