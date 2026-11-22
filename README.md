@@ -53,7 +53,7 @@ call `estimate_doa` directly.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/benchmark-dark.svg">
-  <img alt="Bar chart of time per call, log scale. musicrs is 28× faster than pyMUSIC for narrowband DOA on a 1 s recording, 14× on a 2 s recording, 191× and 122× for single-bin IFB-MUSIC, and 784× for IFB-MUSIC over 80 bins (11.5 s vs 14.7 ms)." src="docs/benchmark.svg">
+  <img alt="Bar chart of time per call on a linear scale; every bar except pyMUSIC's IFB-MUSIC over 80 bins is only a few pixels wide or less, and value labels give the numbers. musicrs is 28× faster than pyMUSIC for narrowband DOA on a 1 s recording, 14× on a 2 s recording, 191× and 122× for single-bin IFB-MUSIC, and 784× for IFB-MUSIC over 80 bins (11.5 s vs 14.7 ms)." src="docs/benchmark.svg">
 </picture>
 
 The same calls on the same recordings (1400 Hz, 40°), from the real-valued samples to the

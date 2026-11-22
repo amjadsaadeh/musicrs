@@ -147,18 +147,18 @@ def bar_chart(samples, summary, theme, path):
     fig, ax = plt.subplots(figsize=(8.4, 0.95 * len(rows) + 1.3), dpi=100)
     fig.patch.set_facecolor(th["surface"])
     style(ax, th)
-    ax.set_xscale("log")
     ax.grid(axis="x", which="major", color=th["grid"], linewidth=1)
     ax.set_axisbelow(True)
 
+    # Linear time axis, so bar lengths compare directly. The fast cases are a few pixels wide
+    # or less next to pyMUSIC's 11.5 s; the value labels carry their numbers.
     bar_h = 0.3  # ~22 px at this size: under the 24 px cap
-    lo = 1e-4
     for i, (key, label, rec) in enumerate(rows):
         y0 = len(rows) - 1 - i
         for j, impl in enumerate(IMPLS):
             s = summary[(impl, key, rec)]
             y = y0 + (0.17 if j == 0 else -0.17)
-            ax.barh(y, s["mean"] - lo, left=lo, height=bar_h, color=th[impl], linewidth=0)
+            ax.barh(y, s["mean"], height=bar_h, color=th[impl], linewidth=0)
             # ±1 stddev whisker; the lower end is clipped to the fastest call
             left = max(s["mean"] - s["std"], s["min"])
             ax.plot([left, s["mean"] + s["std"]], [y, y], color=th["ink2"], linewidth=1.2,
@@ -171,12 +171,13 @@ def bar_chart(samples, summary, theme, path):
 
     ax.set_yticks(range(len(rows)))
     ax.set_yticklabels([r[1] for r in reversed(rows)], fontsize=9.5, color=th["ink"])
-    ax.set_xlim(lo, 300)
-    ticks = [1e-4, 1e-3, 1e-2, 1e-1, 1, 10]
+    # Room right of the longest bar for its value label
+    ax.set_xlim(0, 15)
+    ticks = list(range(0, 13, 2))
     ax.set_xticks(ticks)
-    ax.set_xticklabels(["0.1 ms", "1 ms", "10 ms", "100 ms", "1 s", "10 s"])
+    ax.set_xticklabels([f"{t} s" for t in ticks])
     ax.xaxis.set_minor_locator(matplotlib.ticker.NullLocator())
-    ax.set_xlabel("Time per call, log scale (bar: mean, whisker: ± 1 stddev)",
+    ax.set_xlabel("Time per call (bar: mean, whisker: ± 1 stddev)",
                   color=th["muted"], fontsize=9)
     handles = [matplotlib.patches.Patch(color=th[impl], label=LABEL[impl]) for impl in IMPLS]
     leg = ax.legend(handles=handles, loc="lower left", bbox_to_anchor=(0, 1.0), ncol=2,
