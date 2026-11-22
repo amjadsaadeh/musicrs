@@ -1,0 +1,5 @@
+i got a benchmark in the readme, comparing it between pymusic and this implementation. i suspect the comparison is not fair w.r.t. the python implementation
+
+---
+
+ok do it
