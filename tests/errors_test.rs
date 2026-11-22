@@ -108,6 +108,30 @@ fn noise_subspace_and_spectrum_errors() {
     );
 }
 
+/// Constant data is silent once its mean is removed, whatever the constant and length:
+/// the rounding residue stays below the silence threshold.
+#[test]
+fn constant_data_is_silent() {
+    let est = MusicEstimator::default();
+    for c in [0.3, -0.1, 1.0 / 3.0, PI * 1e5, 1e6 + 0.3, 7e-9, 1e12 / 7.0] {
+        for n in [2, 3, 1000, 1601, 16000] {
+            let data = DMatrix::from_element(4, n, c);
+            assert_eq!(
+                est.estimate_doa_from_real(&data, 1, 1000.0),
+                Err(MusicError::SilentData),
+                "c = {c}, n = {n}"
+            );
+            if n >= NFFT {
+                assert_eq!(
+                    est.ifb_music_spectrum(&data, NFFT, 1, None),
+                    Err(MusicError::SilentData),
+                    "IFB: c = {c}, n = {n}"
+                );
+            }
+        }
+    }
+}
+
 /// An unusable angle grid is an error wherever the grid is searched. `new` does not check
 /// it, because the fields are public and can change after construction.
 #[test]

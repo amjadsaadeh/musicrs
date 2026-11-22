@@ -222,6 +222,29 @@ fn extreme_amplitudes() {
     }
 }
 
+/// A quiet tone on a large DC offset is still found, narrowband and with IFB, whose
+/// silence check compares each bin with the strongest bin, DC included.
+#[test]
+fn quiet_tone_on_large_offset() {
+    let est = MusicEstimator {
+        search_interval: (0.0, PI),
+        angle_steps_num: 360,
+        ..MusicEstimator::default()
+    };
+    let data = kinect_tone(&est, 1000.0, 40.0, 4000).map(|x| 1e6 + 1e-5 * x);
+    let found = est.estimate_doa_from_real(&data, 1, 1000.0).unwrap();
+    assert!((found[0].to_degrees() - 40.0).abs() <= 0.5, "got {found:?}");
+    let (spectrum, angles) = est.ifb_music_spectrum(&data, 160, 1, Some(&[10])).unwrap();
+    let peak = (0..spectrum.len())
+        .max_by(|&a, &b| spectrum[a].total_cmp(&spectrum[b]))
+        .unwrap();
+    assert!(
+        (angles[peak].to_degrees() - 40.0).abs() <= 0.5,
+        "IFB peak {}°",
+        angles[peak].to_degrees()
+    );
+}
+
 /// A one-point grid on an open interval reports its only angle.
 #[test]
 fn one_point_grid() {

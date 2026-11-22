@@ -12,10 +12,11 @@ use crate::stft::{analytic_signal, stft};
 /// Speed of sound in air at ~20 °C, in metres per second.
 const SPEED_OF_SOUND: f64 = 343.2;
 
-/// Power ratio (−200 dB) below which a signal counts as silent: far below any real noise
-/// floor, but above the rounding residue left by removing a constant offset or by FFT
-/// leakage from an on-bin tone.
-const SILENCE_RATIO: f64 = 1e-20;
+/// Power ratio (−260 dB) below which a signal counts as silent: above the rounding residue
+/// left by removing a constant offset or by FFT leakage from an on-bin tone (about
+/// ε² ≈ 5e-32 times a small factor), but low enough that a quiet tone on a large DC
+/// offset (say 1e-5 on 1e6, a ratio of 1e-22) still counts as signal.
+const SILENCE_RATIO: f64 = 1e-26;
 
 /// Default Kinect microphone array positions `(x, y)` in metres.
 const DEFAULT_ANTENNA_POSITIONS: [[f64; 2]; 4] =
@@ -258,6 +259,25 @@ fn power_of_two_scale(max_abs: f64) -> f64 {
 /// `data` divided by [`power_of_two_scale`] of its largest absolute value.
 fn normalised_real(data: &DMatrix<f64>) -> DMatrix<f64> {
     data / power_of_two_scale(data.amax())
+}
+
+/// The mean of `values`, summed with Neumaier's compensated summation so that it is
+/// correct to about one ulp: subtracting it from constant data then leaves (almost)
+/// nothing, which [`SILENCE_RATIO`] relies on. With a plain sum, 16000 samples of 0.3
+/// leave a residue above the threshold.
+fn accurate_mean<'a>(values: impl ExactSizeIterator<Item = &'a f64>) -> f64 {
+    let n = values.len() as f64;
+    let (mut sum, mut compensation) = (0.0_f64, 0.0_f64);
+    for &x in values {
+        let t = sum + x;
+        compensation += if sum.abs() >= x.abs() {
+            (sum - t) + x
+        } else {
+            (x - t) + sum
+        };
+        sum = t;
+    }
+    (sum + compensation) / n
 }
 
 /// Checks that real data has samples and that all of them are finite.
@@ -583,7 +603,7 @@ impl MusicEstimator {
     ///
     /// # Errors
     /// As [`estimate_doa`](Self::estimate_doa); data that is constant on every channel (its
-    /// energy after removing the mean is 200 dB below the input's) is
+    /// energy after removing the mean is 260 dB below the input's) is
     /// [`MusicError::SilentData`].
     ///
     /// # Examples
@@ -618,7 +638,7 @@ impl MusicEstimator {
         let mut complex = CMatrix::zeros(data.nrows(), data.ncols());
         let (mut raw_energy, mut centred_energy) = (0.0, 0.0);
         for m in 0..data.nrows() {
-            let mean = data.row(m).mean();
+            let mean = accurate_mean(data.row(m).iter());
             let row: Vec<f64> = data.row(m).iter().map(|x| x - mean).collect();
             raw_energy += data.row(m).norm_squared();
             centred_energy += row.iter().map(|x| x * x).sum::<f64>();
