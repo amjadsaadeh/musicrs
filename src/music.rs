@@ -783,20 +783,6 @@ impl MusicEstimator {
         let mut angles_out: Vec<f64> = Vec::new();
         let mut n_processed = 0usize;
 
-        // Cross-spectral matrix of each bin, averaged over time windows
-        let covs: Vec<(usize, CMatrix)> = active_bins
-            .into_iter()
-            .map(|bin| {
-                let bin_slices: Vec<&[Cplx]> = stfts.iter().map(|s| s[bin].as_slice()).collect();
-                let mut cov = CMatrix::zeros(n_mics, n_mics);
-                for col in (0..n_windows)
-                    .map(|w| CVec::from_iterator(n_mics, bin_slices.iter().map(|s| s[w])))
-                {
-                    cov += &col * col.adjoint();
-                }
-                (bin, cov.scale(1.0 / n_windows as f64))
-            })
-            .collect();
         // Silence is judged against the strongest bin of the whole spectrum, DC included,
         // so that a requested bin holding only rounding residue is still recognised.
         let strongest = stfts
@@ -810,7 +796,17 @@ impl MusicEstimator {
             .into_iter()
             .fold(0.0, f64::max);
 
-        for (bin, cov) in covs {
+        for bin in active_bins {
+            // Cross-spectral matrix of this bin, averaged over time windows. Built one bin
+            // at a time so that only one n_mics x n_mics matrix is alive at once.
+            let bin_slices: Vec<&[Cplx]> = stfts.iter().map(|s| s[bin].as_slice()).collect();
+            let mut cov = CMatrix::zeros(n_mics, n_mics);
+            for col in
+                (0..n_windows).map(|w| CVec::from_iterator(n_mics, bin_slices.iter().map(|s| s[w])))
+            {
+                cov += &col * col.adjoint();
+            }
+            let cov = cov.scale(1.0 / n_windows as f64);
             if cov.trace().re <= SILENCE_RATIO * strongest {
                 // No power in this bin: its noise subspace would be arbitrary.
                 continue;
