@@ -1,0 +1,67 @@
+{
+  "cli_version": "0.13.4",
+  "checkpoint_id": "01M81YZRNDZZ4EP1JA2ASPB3YF",
+  "session_id": "860b07ee-3f92-4815-ab52-690d0ae10c8e",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-22T15:46:31.567561261Z",
+  "branch": "fix/ifb-memory",
+  "checkpoints_count": 3,
+  "files_touched": [
+    "CLAUDE.md",
+    "src/music.rs",
+    "tests/ifb_test.rs"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-opus-5-5",
+  "turn_id": "57c2c32a9957",
+  "checkpoint_transcript_start": 981,
+  "transcript_lines_at_start": 981,
+  "compact_transcript_start": 85,
+  "token_usage": {
+    "input_tokens": 2,
+    "cache_creation_tokens": 1600,
+    "cache_read_tokens": 113644,
+    "output_tokens": 364,
+    "api_call_count": 1,
+    "subagent_tokens": {
+      "input_tokens": 94,
+      "cache_creation_tokens": 25289,
+      "cache_read_tokens": 2609372,
+      "output_tokens": 3959,
+      "api_call_count": 45
+    },
+    "subagent_tokens_complete": true
+  },
+  "session_token_usage": {
+    "input_tokens": 56,
+    "cache_creation_tokens": 96818,
+    "cache_read_tokens": 2050655,
+    "output_tokens": 24882,
+    "api_call_count": 24,
+    "subagent_tokens": {
+      "input_tokens": 292,
+      "cache_creation_tokens": 413587,
+      "cache_read_tokens": 6365883,
+      "output_tokens": 43314,
+      "api_call_count": 139
+    },
+    "subagent_tokens_complete": true
+  },
+  "redaction": {
+    "replacements": 42,
+    "layers": {
+      "betterleaks": 0,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 42,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "session_metrics": {
+    "turn_count": 5
+  }
+}

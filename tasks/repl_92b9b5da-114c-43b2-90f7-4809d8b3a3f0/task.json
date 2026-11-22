@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "repl_92b9b5da-114c-43b2-90f7-4809d8b3a3f0",
+  "agent_id": "ac989696aebf1b3c1",
+  "subagent_type": "general-purpose",
+  "task_description": "stft huge nfft",
+  "token_usage": {
+    "input_tokens": 34,
+    "cache_creation_tokens": 48764,
+    "cache_read_tokens": 644849,
+    "output_tokens": 4382,
+    "api_call_count": 42
+  },
+  "started_at": "2026-11-22T15:55:58.798637228+01:00",
+  "completed_at": "2026-11-22T16:43:47.819518446+01:00"
+}
