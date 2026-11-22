@@ -18,6 +18,7 @@ cargo test --lib        # unit tests only
 cargo test --test '*'   # integration tests only
 cargo test --test golden_test   # parity with the original pyMUSIC spectra
 cargo clippy --all-targets -- -D warnings   # CI runs this and `cargo fmt --check`
+cargo audit             # RustSec advisories in Cargo.lock (CI runs this; install cargo-audit first)
 
 # Documentation
 cargo doc --open
