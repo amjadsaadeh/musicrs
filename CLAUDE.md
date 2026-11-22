@@ -38,8 +38,8 @@ tests/
 ├── errors_test.rs               # Every MusicError the public API returns
 ├── golden_test.rs               # Spectra vs. pyMUSIC output; musicrs snapshots at/above Nyquist
 ├── broadband_test.rs            # IFB-MUSIC on composite multi-tone signals
-├── noisy_data_test.rs           # Narrowband DOA with added white noise
-├── synthetic_test.rs            # Synthetic plane waves: 2-D arrays, 2–3 sources, no mirror ambiguity
+├── noisy_data_test.rs           # Narrowband and IFB (energy-selected bins) DOA with added white noise
+├── synthetic_test.rs            # Synthetic plane waves: 2-D arrays, 2–3 sources, endfire, edge cases, 48 kHz
 ├── golden/                      # pyMUSIC reference CSVs, *.musicrs.csv snapshots, generate_golden.py
 └── data/single-source/*.wav     # 4-channel 24-bit 16kHz test recordings
 examples/bench_pymusic.rs        # musicrs side of the runtime benchmark vs pyMUSIC

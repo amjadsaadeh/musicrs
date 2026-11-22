@@ -85,9 +85,17 @@ pub fn analytic_signal(data: &[f64]) -> Vec<Complex<f64>> {
 /// let sine: Vec<f64> = (0..n)
 ///     .map(|i| (2.0 * PI * freq_bin as f64 * i as f64 / sr).sin())
 ///     .collect();
-/// let result = stft(&sine, 64, 0).unwrap();
-/// // Each window should have a peak at `freq_bin` (relative to the window size)
-/// assert!(!result.is_empty());
+/// let result = stft(&sine, 64, 0)?;
+/// assert_eq!(result.len(), 64 / 2 + 1); // bins 0..=32
+/// assert_eq!(result[0].len(), 512 / 64); // non-overlapping windows
+/// // 16 cycles per 512 samples is 2 cycles per 64-sample window: bin 2 in every window
+/// for w in 0..result[0].len() {
+///     let peak = (0..result.len())
+///         .max_by(|&a, &b| result[a][w].norm().total_cmp(&result[b][w].norm()))
+///         .unwrap();
+///     assert_eq!(peak, 2);
+/// }
+/// # Ok::<(), musicrs::MusicError>(())
 /// ```
 pub fn stft(data: &[f64], nfft: usize, no_overlap: usize) -> Result<Vec<Vec<Complex<f64>>>> {
     if nfft == 0 {
