@@ -1,0 +1,13 @@
+retr
+
+---
+
+so your vode review just showed nothing?
+
+---
+
+fix all, but not 3. use an agent team and split tasks into branches on your behalf
+
+---
+
+push them and open stacked PRs when done
