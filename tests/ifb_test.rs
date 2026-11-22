@@ -8,7 +8,7 @@ mod common;
 
 use std::path::Path;
 
-use musicrs::MusicEstimator;
+use musicrs::{MusicEstimator, select_bins_by_energy};
 use nalgebra::DMatrix;
 
 const NFFT: usize = 160;
@@ -97,4 +97,40 @@ fn ifb_data_shorter_than_window_is_flat() {
     let (spectrum, angles) = est.ifb_music_spectrum(&DMatrix::zeros(4, NFFT - 1), NFFT, 1, None);
     assert_eq!(angles.len(), est.angle_steps_num);
     assert!(spectrum.iter().all(|&v| v == 1.0));
+}
+
+/// With bins picked by energy (within 20 dB of the strongest), IFB-MUSIC finds every
+/// recording below Nyquist. At nfft = 160 every tone falls on a bin, so selection picks
+/// that bin and the estimate is exact; with all bins (`None`) noise-only bins dominate and
+/// estimates are off by up to ~130°.
+#[test]
+fn ifb_energy_selected_bins_doa() {
+    let est = MusicEstimator::default();
+    let mut log = common::ErrorLog::new("IFB energy-selected bins, nfft 160");
+
+    for path in common::wav_files() {
+        let meta = common::parse_meta(&path);
+        if meta.frequency_hz >= est.sample_rate / 2.0 {
+            continue;
+        }
+        let (_, data) = common::read_wav_4ch(&path);
+        let bins = select_bins_by_energy(&data, NFFT, 20.0);
+        let (spectrum, angles) = est.ifb_music_spectrum(&data, NFFT, 1, Some(&bins));
+        let argmax = (0..spectrum.len())
+            .max_by(|&a, &b| spectrum[a].total_cmp(&spectrum[b]))
+            .unwrap();
+        let error = common::angular_error(
+            angles[argmax].to_degrees(),
+            &[meta.doa_deg, 360.0 - meta.doa_deg],
+        );
+        log.record(
+            format!(
+                "{} (bins {bins:?})",
+                path.file_name().unwrap().to_string_lossy()
+            ),
+            error,
+        );
+    }
+
+    log.check(TOLERANCE_DEG);
 }

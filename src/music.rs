@@ -111,6 +111,66 @@ fn find_peaks(scores: &[f64], angles: &[f64], n: usize, circular: bool) -> Vec<f
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Bin selection for IFB-MUSIC
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Picks the STFT bins that carry signal, for [`MusicEstimator::ifb_music_spectrum`].
+///
+/// IFB-MUSIC weights every bin equally, so bins holding only noise point the merged
+/// spectrum in arbitrary directions. This keeps the bins whose power is within
+/// `threshold_db` of the strongest bin. A bin's power is the trace of its cross-spectral
+/// matrix: `|X|²` summed over microphones and averaged over windows, using the same
+/// non-overlapping `nfft`-sample STFT windows as `ifb_music_spectrum`.
+///
+/// The DC bin is never selected (as with `bins = None`). Returns bin indices in ascending
+/// order; empty if `data` is shorter than one window or silent.
+///
+/// A tone between two bins leaks into its neighbours, and each selected bin is steered at
+/// the bin's frequency rather than the tone's. The mismatch shifts the estimate, most
+/// near endfire (0° / 180° for a line array): on the test recordings at `nfft = 1024`
+/// (15.6 Hz bins), a single tone is off by up to 5.5° at 0° and 1.5° elsewhere. Choose
+/// `nfft` so the tones fall on bins where possible.
+///
+/// # Panics
+/// Panics if `threshold_db` is negative or not finite.
+///
+/// # Examples
+/// ```
+/// use musicrs::{MusicEstimator, select_bins_by_energy};
+/// use nalgebra::DMatrix;
+/// use std::f64::consts::PI;
+///
+/// // A 1 kHz tone: with nfft = 160 at 16 kHz the bins are 100 Hz apart, so it is bin 10.
+/// let est = MusicEstimator::default();
+/// let data = DMatrix::from_fn(4, 16000, |_, t| (2.0 * PI * 1000.0 * t as f64 / 16000.0).cos());
+/// let bins = select_bins_by_energy(&data, 160, 20.0);
+/// assert_eq!(bins, [10]);
+/// let (spectrum, angles) = est.ifb_music_spectrum(&data, 160, 1, Some(&bins));
+/// # let _ = (spectrum, angles);
+/// ```
+pub fn select_bins_by_energy(data: &DMatrix<f64>, nfft: usize, threshold_db: f64) -> Vec<usize> {
+    assert!(
+        threshold_db.is_finite() && threshold_db >= 0.0,
+        "threshold_db must be finite and non-negative"
+    );
+    let mut power = vec![0.0; nfft / 2 + 1];
+    for m in 0..data.nrows() {
+        let row: Vec<f64> = data.row(m).iter().copied().collect();
+        for (p, bin) in power.iter_mut().zip(stft(&row, nfft, 0)) {
+            if !bin.is_empty() {
+                *p += bin.iter().map(|c| c.norm_sqr()).sum::<f64>() / bin.len() as f64;
+            }
+        }
+    }
+    let strongest = power[1..].iter().copied().fold(0.0, f64::max);
+    if strongest <= 0.0 {
+        return Vec::new();
+    }
+    let floor = strongest * 10f64.powf(-threshold_db / 10.0);
+    (1..power.len()).filter(|&k| power[k] >= floor).collect()
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // MusicEstimator
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -754,6 +814,41 @@ mod tests {
         for &s in &scores[1..] {
             assert_abs_diff_eq!(s, first, epsilon = 1e-9);
         }
+    }
+
+    // ── select_bins_by_energy ──────────────────────────────────────────────────
+
+    /// Two on-bin tones, the second 6 dB weaker, plus a DC offset stronger than both.
+    fn two_tones_with_dc() -> DMatrix<f64> {
+        let (nfft, sr) = (64.0, 16000.0);
+        DMatrix::from_fn(3, 64 * 20, |m, t| {
+            let t = t as f64 / sr;
+            let tone = |bin: f64, amp: f64| amp * (2.0 * PI * bin * sr / nfft * t + m as f64).cos();
+            5.0 + tone(5.0, 1.0) + tone(20.0, 0.5)
+        })
+    }
+
+    #[test]
+    fn select_bins_by_energy_applies_threshold_and_skips_dc() {
+        let data = two_tones_with_dc();
+        assert_eq!(select_bins_by_energy(&data, 64, 20.0), [5, 20]);
+        assert_eq!(select_bins_by_energy(&data, 64, 7.0), [5, 20]);
+        assert_eq!(select_bins_by_energy(&data, 64, 5.0), [5]);
+        assert_eq!(select_bins_by_energy(&data, 64, 0.0), [5]);
+    }
+
+    #[test]
+    fn select_bins_by_energy_empty_for_silence_or_short_data() {
+        assert!(select_bins_by_energy(&DMatrix::zeros(4, 640), 64, 20.0).is_empty());
+        assert!(
+            select_bins_by_energy(&two_tones_with_dc().columns(0, 63).into(), 64, 20.0).is_empty()
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "threshold_db must be finite and non-negative")]
+    fn select_bins_by_energy_rejects_negative_threshold() {
+        select_bins_by_energy(&two_tones_with_dc(), 64, -1.0);
     }
 
     // ── find_peaks ────────────────────────────────────────────────────────────
