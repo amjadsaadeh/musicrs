@@ -327,8 +327,15 @@ const SNAPSHOT_CASES: [(&str, f64); 4] = [
     ("single-source_9100Hz_160deg_2.0s", 9100.0),
 ];
 /// Snapshots compare musicrs with itself, so only floating-point noise across
-/// platforms/toolchains should remain.
-const SNAPSHOT_REL_TOLERANCE: f64 = 1e-9;
+/// platforms, toolchains and eigensolver versions should remain.
+///
+/// The tolerance applies to the MUSIC denominator `d(θ) = 1 / spectrum(θ) = ‖Eₙᴴ·a(θ)‖²`,
+/// relative to its largest value over the grid. Rounding in the eigendecomposition
+/// perturbs `d` by an absolute amount of order ε·‖a‖², so at a peak, where `d` is
+/// itself near rounding level, the spectrum's *relative* error can be large (up to 5e-8
+/// when faer went from 0.19 to 0.24) without any behavioural change. A real change (sign
+/// convention, Nyquist handling) moves `d` by a sizeable fraction of its maximum.
+const SNAPSHOT_TOLERANCE: f64 = 1e-9;
 
 #[test]
 fn narrowband_spectrum_matches_musicrs_snapshot_at_and_above_nyquist() {
@@ -348,14 +355,24 @@ fn narrowband_spectrum_matches_musicrs_snapshot_at_and_above_nyquist() {
         }
         let (s_angles, s_spectrum) = read_golden(&name);
         assert_eq!(angles, s_angles, "{name}: angle grid differs");
-        let err = spectrum
+        assert_eq!(
+            argmax(&spectrum),
+            argmax(&s_spectrum),
+            "{name}: peak moved from {:.1}° to {:.1}°",
+            angles[argmax(&s_spectrum)].to_degrees(),
+            angles[argmax(&spectrum)].to_degrees()
+        );
+        let denominator = |s: &[f64]| s.iter().map(|v| 1.0 / v).collect::<Vec<f64>>();
+        let (d, d_snap) = (denominator(&spectrum), denominator(&s_spectrum));
+        let scale = d_snap.iter().copied().fold(0.0, f64::max);
+        let err = d
             .iter()
-            .zip(&s_spectrum)
-            .map(|(s, g)| (s - g).abs() / g.abs())
+            .zip(&d_snap)
+            .map(|(x, g)| (x - g).abs() / scale)
             .fold(0.0, f64::max);
-        println!("{name}: max relative error vs snapshot {err:.3e}");
+        println!("{name}: max error of 1/spectrum vs snapshot, relative to its maximum {err:.3e}");
         assert!(
-            err < SNAPSHOT_REL_TOLERANCE,
+            err < SNAPSHOT_TOLERANCE,
             "{name}: musicrs output changed by {err:.3e} relative to its snapshot; if \
              intended, regenerate with MUSICRS_UPDATE_SNAPSHOTS=1 cargo test --test golden_test"
         );
