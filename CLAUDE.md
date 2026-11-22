@@ -18,6 +18,7 @@ cargo test --lib        # unit tests only
 cargo test --test '*'   # integration tests only
 cargo test --test golden_test   # parity with the original pyMUSIC spectra
 cargo clippy --all-targets -- -D warnings   # CI runs this and `cargo fmt --check`
+cargo audit             # RustSec advisories in Cargo.lock (CI runs this; install cargo-audit first)
 
 # Documentation
 cargo doc --open
@@ -34,7 +35,7 @@ src/
 tests/
 ├── common/mod.rs                # Shared WAV/filename/angle helpers, ErrorLog
 ├── integration_test.rs          # Narrowband DOA on every WAV recording (±0.5°)
-├── ifb_test.rs                  # IFB-MUSIC on the tone's bin (nfft 160), below Nyquist (±0.5°)
+├── ifb_test.rs                  # IFB-MUSIC on the tone's bin (nfft 160), below Nyquist (±0.5°); repeated and reordered bins
 ├── errors_test.rs               # Every MusicError the public API returns
 ├── golden_test.rs               # Spectra vs. pyMUSIC (incl. partial interval, 2 sources narrowband and IFB, nfft 320/1024); analytic signal vs. scipy; musicrs snapshots at/above Nyquist
 ├── broadband_test.rs            # IFB-MUSIC on composite multi-tone signals; two sources at different angles
@@ -55,7 +56,7 @@ docs/benchmark*.svg              # charts shown in the README (light and dark), 
 - `analytic_signal()` — converts real signal to complex via Hilbert transform (FFT-based)
 - `stft()` — Short-Time Fourier Transform with configurable window and overlap
 
-- `MusicError` — bad data (wrong row count or covariance shape, no samples, NaN/inf, silence) and bad parameters (too many sources, angle grid incl. spans over 2π, frequency ≤ 0 or non-finite, sample rate, antenna positions, `nfft`, overlap, threshold, no usable bins) are returned as `Err`; the public API does not panic on them and does not return a quiet wrong answer. The estimator's fields are checked where they are used, not in `new()`, because the fields are public. `noise_subspace` reads only the lower triangle of `cov`; IFB never uses the DC bin
+- `MusicError` — bad data (wrong row count or covariance shape, no samples, NaN/inf, silence) and bad parameters (too many or zero sources, angle grid incl. spans over 2π, frequency ≤ 0 or non-finite, sample rate, antenna positions, `nfft`, overlap, threshold, no usable bins) are returned as `Err`; the public API does not panic on them and does not return a quiet wrong answer. The estimator's fields are checked where they are used, not in `new()`, because the fields are public. `noise_subspace` reads only the lower triangle of `cov`; IFB never uses the DC bin
 
 **Core algorithm flow:**
 1. Compute covariance matrix of complex multichannel input

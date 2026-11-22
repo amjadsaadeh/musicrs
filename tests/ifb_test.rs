@@ -85,6 +85,25 @@ fn ifb_repeated_bin_equals_single_bin() {
     assert_same_spectrum(&thrice, &once);
 }
 
+/// Repeated bins are counted once and the order of the bins does not matter: on two tones,
+/// each carrying signal on its own bin, listing them as [b, a, a, b, b] must not weight
+/// bin b more than bin a.
+#[test]
+fn ifb_duplicate_and_reordered_bins_are_ignored() {
+    let est = MusicEstimator::default();
+    let low = load("single-source_1400Hz_40deg_1.0s");
+    let high = load("single-source_3600Hz_120deg_1.0s");
+    let n = low.ncols().min(high.ncols());
+    let data = low.columns(0, n) + high.columns(0, n);
+    let (plain, _) = est
+        .ifb_music_spectrum(&data, NFFT, 1, Some(&[14, 36]))
+        .unwrap();
+    let (repeated, _) = est
+        .ifb_music_spectrum(&data, NFFT, 1, Some(&[36, 14, 14, 36, 36]))
+        .unwrap();
+    assert_eq!(repeated, plain);
+}
+
 /// Bins at or above `nfft / 2 + 1` are skipped.
 #[test]
 fn ifb_ignores_out_of_range_bins() {

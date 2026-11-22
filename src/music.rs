@@ -5,9 +5,10 @@ use std::f64::consts::PI;
 use nalgebra::DMatrix;
 use nalgebra::DVector;
 use num_complex::Complex;
+use rustfft::FftPlanner;
 
 use crate::error::{MusicError, Result};
-use crate::stft::{analytic_signal, stft};
+use crate::stft::{analytic_signal_with, stft_with};
 
 /// Speed of sound in air at ~20 °C, in metres per second.
 const SPEED_OF_SOUND: f64 = 343.2;
@@ -230,10 +231,17 @@ pub fn select_bins_by_energy(
             samples: data.ncols(),
         });
     }
+    // Without this, the power sums underflow to 0 for very quiet data (SilentData) and
+    // overflow to infinity for very loud data (every bin selected).
+    let data = &normalised_real(data);
     let mut power = vec![0.0; nfft / 2 + 1];
+    let mut planner = FftPlanner::new();
     for m in 0..data.nrows() {
         let row: Vec<f64> = data.row(m).iter().copied().collect();
-        for (p, bin) in power.iter_mut().zip(stft(&row, nfft, 0)?) {
+        for (p, bin) in power
+            .iter_mut()
+            .zip(stft_with(&row, nfft, 0, &mut planner)?)
+        {
             *p += bin.iter().map(|c| c.norm_sqr()).sum::<f64>() / bin.len() as f64;
         }
     }
@@ -436,14 +444,18 @@ impl MusicEstimator {
         }
     }
 
+    /// Checks that `0 < n_sources < n_antennas`. Zero sources would make the noise
+    /// subspace the whole space and the spectrum meaningless.
     fn check_sources(&self, n_sources: usize) -> Result<()> {
-        if n_sources < self.n_antennas() {
-            Ok(())
-        } else {
+        if n_sources >= self.n_antennas() {
             Err(MusicError::TooManySources {
                 n_sources,
                 n_antennas: self.n_antennas(),
             })
+        } else if n_sources == 0 {
+            Err(MusicError::NoSources)
+        } else {
+            Ok(())
         }
     }
 
@@ -509,15 +521,16 @@ impl MusicEstimator {
     ///
     /// # Arguments
     /// * `cov`       – Hermitian covariance matrix (n_antennas × n_antennas).
-    /// * `n_sources` – Number of signal sources (must be < n_antennas).
+    /// * `n_sources` – Number of signal sources (must be in `1..n_antennas`).
     ///
     /// `cov` is assumed to be Hermitian, as every covariance matrix is: only its lower
     /// triangle (diagonal included) is read.
     ///
     /// # Errors
     /// [`MusicError::CovarianceShape`] if `cov` is not n_antennas × n_antennas,
-    /// [`MusicError::NonFiniteData`] if it contains NaN or infinity, and
-    /// [`MusicError::TooManySources`] if `n_sources >= n_antennas`.
+    /// [`MusicError::NonFiniteData`] if it contains NaN or infinity,
+    /// [`MusicError::TooManySources`] if `n_sources >= n_antennas`, and
+    /// [`MusicError::NoSources`] if `n_sources` is 0.
     pub fn noise_subspace(&self, cov: &CMatrix, n_sources: usize) -> Result<CMatrix> {
         let n = self.n_antennas();
         if cov.shape() != (n, n) {
@@ -598,7 +611,8 @@ impl MusicEstimator {
     /// - [`MusicError::RowCountMismatch`] if `data` does not have one row per antenna.
     /// - [`MusicError::EmptyData`] if it has no samples, [`MusicError::NonFiniteData`]
     ///   if it contains NaN or infinity, [`MusicError::SilentData`] if it is all zeros.
-    /// - [`MusicError::TooManySources`] if `n_sources >= n_antennas`.
+    /// - [`MusicError::TooManySources`] if `n_sources >= n_antennas`, [`MusicError::NoSources`]
+    ///   if it is 0.
     /// - [`MusicError::InvalidFrequency`] unless `frequency` is finite and positive.
     /// - [`MusicError::InvalidAngleGrid`], [`MusicError::InvalidSampleRate`] or
     ///   [`MusicError::InvalidAntennaPosition`] for an unusable estimator (see [`new`](Self::new)).
@@ -688,12 +702,16 @@ impl MusicEstimator {
         let data = &normalised_real(data);
         let mut complex = CMatrix::zeros(data.nrows(), data.ncols());
         let (mut raw_energy, mut centred_energy) = (0.0, 0.0);
+        let mut planner = FftPlanner::new();
         for m in 0..data.nrows() {
             let mean = accurate_mean(data.row(m).iter());
             let row: Vec<f64> = data.row(m).iter().map(|x| x - mean).collect();
             raw_energy += data.row(m).norm_squared();
             centred_energy += row.iter().map(|x| x * x).sum::<f64>();
-            for (t, c) in analytic_signal(&row).into_iter().enumerate() {
+            for (t, c) in analytic_signal_with(&row, &mut planner)
+                .into_iter()
+                .enumerate()
+            {
                 complex[(m, t)] = c;
             }
         }
@@ -714,7 +732,8 @@ impl MusicEstimator {
     /// * `n_sources`     – Number of sources.
     /// * `bins`          – Frequency bin indices to use; `None` uses all bins except DC.
     ///   The DC bin 0 (it has no direction information), bins at or above `nfft / 2 + 1`
-    ///   and bins with no power are ignored.
+    ///   and bins with no power are ignored. Each bin counts once in the geometric mean,
+    ///   however often it is listed and in whatever order.
     ///
     /// Bin frequencies are derived from [`MusicEstimator::sample_rate`], the same rate
     /// [`steering_vector`](Self::steering_vector) uses for its Nyquist handling.
@@ -729,7 +748,8 @@ impl MusicEstimator {
     ///   [`MusicError::NonFiniteData`] for unusable data, and
     ///   [`MusicError::DataShorterThanWindow`] if it has no complete STFT window.
     /// - [`MusicError::InvalidNfft`] if `nfft` is 0.
-    /// - [`MusicError::TooManySources`] if `n_sources >= n_antennas`.
+    /// - [`MusicError::TooManySources`] if `n_sources >= n_antennas`, [`MusicError::NoSources`]
+    ///   if it is 0.
     /// - [`MusicError::NoUsableBins`] if none of the bins is in `1..=nfft / 2` (for `None`:
     ///   `nfft` is 1).
     /// - [`MusicError::SilentData`] if no usable bin has power.
@@ -760,21 +780,26 @@ impl MusicEstimator {
         let freq_bins = nfft / 2 + 1;
 
         let default_bins: Vec<usize> = (1..freq_bins).collect();
-        let active_bins: Vec<usize> = bins
+        let mut active_bins: Vec<usize> = bins
             .unwrap_or(&default_bins)
             .iter()
             .copied()
             .filter(|bin| (1..freq_bins).contains(bin))
             .collect();
+        // A repeated bin would count more than once in the geometric mean; the order of the
+        // bins does not change the mean.
+        active_bins.sort_unstable();
+        active_bins.dedup();
         if active_bins.is_empty() {
             return Err(MusicError::NoUsableBins);
         }
 
-        // STFT per microphone channel
+        // STFT per microphone channel, all sharing one FFT plan
+        let mut planner = FftPlanner::new();
         let stfts: Vec<Vec<Vec<Cplx>>> = (0..n_mics)
             .map(|m| {
                 let row: Vec<f64> = data.row(m).iter().copied().collect();
-                stft(&row, nfft, 0)
+                stft_with(&row, nfft, 0, &mut planner)
             })
             .collect::<Result<_>>()?;
         let n_windows = stfts[0][0].len();
@@ -785,20 +810,6 @@ impl MusicEstimator {
         let mut angles_out: Vec<f64> = Vec::new();
         let mut n_processed = 0usize;
 
-        // Cross-spectral matrix of each bin, averaged over time windows
-        let covs: Vec<(usize, CMatrix)> = active_bins
-            .into_iter()
-            .map(|bin| {
-                let bin_slices: Vec<&[Cplx]> = stfts.iter().map(|s| s[bin].as_slice()).collect();
-                let mut cov = CMatrix::zeros(n_mics, n_mics);
-                for col in (0..n_windows)
-                    .map(|w| CVec::from_iterator(n_mics, bin_slices.iter().map(|s| s[w])))
-                {
-                    cov += &col * col.adjoint();
-                }
-                (bin, cov.scale(1.0 / n_windows as f64))
-            })
-            .collect();
         // Silence is judged against the strongest bin of the whole spectrum, DC included,
         // so that a requested bin holding only rounding residue is still recognised.
         let strongest = stfts
@@ -812,7 +823,17 @@ impl MusicEstimator {
             .into_iter()
             .fold(0.0, f64::max);
 
-        for (bin, cov) in covs {
+        for bin in active_bins {
+            // Cross-spectral matrix of this bin, averaged over time windows. Built one bin
+            // at a time so that only one n_mics x n_mics matrix is alive at once.
+            let bin_slices: Vec<&[Cplx]> = stfts.iter().map(|s| s[bin].as_slice()).collect();
+            let mut cov = CMatrix::zeros(n_mics, n_mics);
+            for col in
+                (0..n_windows).map(|w| CVec::from_iterator(n_mics, bin_slices.iter().map(|s| s[w])))
+            {
+                cov += &col * col.adjoint();
+            }
+            let cov = cov.scale(1.0 / n_windows as f64);
             if cov.trace().re <= SILENCE_RATIO * strongest {
                 // No power in this bin: its noise subspace would be arbitrary.
                 continue;
@@ -1189,6 +1210,38 @@ mod tests {
                 samples: 63
             })
         );
+    }
+
+    #[test]
+    fn select_bins_by_energy_does_not_depend_on_scale() {
+        // A 1 kHz tone at 16 kHz with nfft = 160 is bin 10. Unnormalised, the power sums
+        // underflowed at 1e-170 (SilentData) and overflowed at 1e300 (all 80 bins).
+        let tone = DMatrix::from_fn(4, 1600, |m, t| {
+            (2.0 * PI * 1000.0 * t as f64 / 16000.0 + m as f64).cos()
+        });
+        for scale in [1e-300, 1e-200, 1e-170, 1.0, 1e150, 1e300] {
+            assert_eq!(
+                select_bins_by_energy(&(&tone * scale), 160, 20.0),
+                Ok(vec![10]),
+                "scale {scale:e}"
+            );
+        }
+        let data = two_tones_with_dc();
+        for scale in [1e-200, 1e200] {
+            assert_eq!(
+                select_bins_by_energy(&(&data * scale), 64, 20.0),
+                Ok(vec![5, 20]),
+                "scale {scale:e}"
+            );
+        }
+        // Silence stays silence at any scale
+        for scale in [1e-300, 1e300] {
+            assert_eq!(
+                select_bins_by_energy(&DMatrix::from_element(4, 640, 0.5 * scale), 64, 20.0),
+                Err(MusicError::SilentData),
+                "scale {scale:e}"
+            );
+        }
     }
 
     #[test]
