@@ -1,0 +1,5 @@
+compare with https://github.com/amjadsaadeh/pyMUSIC. is anything missing in the new implementation?
+
+---
+
+first fix docs and asserts in one branch, push it and open a pr. then based on this branch create a runtime benchmark comparing this impmentaiton with pymusic. create a nice bar chart for easy comparison and add it to the readme
