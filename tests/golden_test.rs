@@ -7,6 +7,8 @@
 //   * `*.eig.csv`  – pyMUSIC as published. On this nearly noiseless data `eig`
 //     returns a non-orthogonal noise basis, so the values are basis-dependent; only
 //     the peak location is compared.
+//   * `*.hilbert_n<N>.scipy.csv` – `scipy.signal.hilbert` of one channel, compared
+//     with `analytic_signal` value by value.
 //
 // At and above Nyquist (8000 Hz and 9100 Hz here) musicrs deliberately differs from
 // pyMUSIC (real steering vector at f == sr/2, conjugated one above it; see CLAUDE.md
@@ -18,6 +20,7 @@
 
 mod common;
 
+use std::f64::consts::PI;
 use std::fs;
 use std::path::Path;
 
@@ -121,12 +124,23 @@ fn check(prefix: &str, angles: &[f64], spectrum: &[f64]) {
 /// `(spectrum, angles)`.
 fn narrowband_spectrum(est: &MusicEstimator, stem: &str, freq: f64) -> (Vec<f64>, Vec<f64>) {
     let (_, data) = common::read_wav_4ch(&Path::new(common::DATA_DIR).join(format!("{stem}.wav")));
+    narrowband_spectrum_of(est, &data, freq, 1)
+}
+
+/// Narrowband spectrum of `data` with `n_sources` sources, without the mean removal
+/// `estimate_doa_from_real` does (pyMUSIC does not remove it).
+fn narrowband_spectrum_of(
+    est: &MusicEstimator,
+    data: &DMatrix<f64>,
+    freq: f64,
+    n_sources: usize,
+) -> (Vec<f64>, Vec<f64>) {
     let analytic: Vec<Vec<_>> = (0..data.nrows())
         .map(|m| analytic_signal(&data.row(m).iter().copied().collect::<Vec<_>>()))
         .collect();
     let x = DMatrix::from_fn(data.nrows(), data.ncols(), |m, t| analytic[m][t]);
     let cov = (&x * x.adjoint()).scale(1.0 / data.ncols() as f64);
-    let noise = est.noise_subspace(&cov, 1).unwrap();
+    let noise = est.noise_subspace(&cov, n_sources).unwrap();
     est.spectrum(&noise, freq).unwrap()
 }
 
@@ -186,6 +200,101 @@ fn ifb_multi_bin_spectrum_matches_pymusic() {
             &angles,
             &spectrum,
         );
+    }
+}
+
+/// Narrowband on half the circle (360 steps, so still a 0.5° grid). On `(π, 2π)` the
+/// 120° source shows up as its mirror image, 240°.
+#[test]
+fn narrowband_partial_interval_matches_pymusic() {
+    let cases = [
+        (
+            "single-source_1400Hz_40deg_1.0s",
+            1400.0,
+            "0-180deg",
+            (0.0, PI),
+        ),
+        (
+            "single-source_4700Hz_120deg_1.0s",
+            4700.0,
+            "180-360deg",
+            (PI, 2.0 * PI),
+        ),
+    ];
+    for (stem, freq, interval_name, interval) in cases {
+        let est = MusicEstimator {
+            angle_steps_num: 360,
+            search_interval: interval,
+            ..MusicEstimator::default()
+        };
+        let (spectrum, angles) = narrowband_spectrum(&est, stem, freq);
+        check(
+            &format!("{stem}.narrowband_{interval_name}"),
+            &angles,
+            &spectrum,
+        );
+    }
+}
+
+/// IFB at STFT sizes other than 160. At nfft 1024 the tone falls between the two bins.
+#[test]
+fn ifb_other_nfft_matches_pymusic() {
+    let cases: [(&str, usize, &[usize]); 4] = [
+        ("single-source_1400Hz_40deg_1.0s", 320, &[28]),
+        ("single-source_4700Hz_120deg_1.0s", 320, &[94]),
+        ("single-source_1400Hz_40deg_1.0s", 1024, &[89, 90]),
+        ("single-source_4700Hz_120deg_1.0s", 1024, &[300, 301]),
+    ];
+    let est = MusicEstimator::default();
+    for (stem, nfft, bins) in cases {
+        let (_, data) =
+            common::read_wav_4ch(&Path::new(common::DATA_DIR).join(format!("{stem}.wav")));
+        let (spectrum, angles) = est.ifb_music_spectrum(&data, nfft, 1, Some(bins)).unwrap();
+        let bin_names: Vec<String> = bins.iter().map(usize::to_string).collect();
+        check(
+            &format!("{stem}.ifb_nfft{nfft}_bins{}", bin_names.join("-")),
+            &angles,
+            &spectrum,
+        );
+    }
+}
+
+/// Narrowband with two sources: 1400 Hz from 40° plus 2500 Hz from 120°, analysed at
+/// 1400 Hz. The covariance has rank 2, so the two-dimensional noise subspace is well
+/// defined (two same-frequency recordings would be coherent, i.e. rank 1).
+#[test]
+fn narrowband_two_sources_matches_pymusic() {
+    let est = MusicEstimator::default();
+    let a = common::read_wav_4ch(&common::wav_path(1400, 40, "1.0s")).1;
+    let b = common::read_wav_4ch(&common::wav_path(2500, 120, "1.0s")).1;
+    let n = a.ncols().min(b.ncols());
+    let data = a.columns(0, n) + b.columns(0, n);
+    let (spectrum, angles) = narrowband_spectrum_of(&est, &data, 1400.0, 2);
+    check(
+        "composite_1400Hz_40deg+2500Hz_120deg_1.0s.narrowband_1400Hz_2src",
+        &angles,
+        &spectrum,
+    );
+}
+
+/// `analytic_signal` against `scipy.signal.hilbert`, value by value, for an even and an
+/// odd length (odd lengths have no Nyquist bin).
+#[test]
+fn analytic_signal_matches_scipy() {
+    let (_, data) = common::read_wav_4ch(&common::wav_path(1400, 40, "1.0s"));
+    for n in [2048, 2047] {
+        let name = format!("single-source_1400Hz_40deg_1.0s.ch0.hilbert_n{n}.scipy.csv");
+        let (re, im) = read_golden(&name);
+        assert_eq!(re.len(), n, "{name}: length");
+        let input: Vec<f64> = data.row(0).iter().take(n).copied().collect();
+        let z = analytic_signal(&input);
+        let err = z
+            .iter()
+            .zip(re.iter().zip(&im))
+            .map(|(c, (r, i))| (c.re - r).abs().max((c.im - i).abs()))
+            .fold(0.0, f64::max);
+        println!("{name}: max abs error vs scipy {err:.3e}");
+        assert!(err < 1e-12, "{name}: deviates from scipy by {err:.3e}");
     }
 }
 
