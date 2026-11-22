@@ -1,0 +1,51 @@
+retr
+
+---
+
+so your vode review just showed nothing?
+
+---
+
+fix all, but not 3. use an agent team and split tasks into branches on your behalf
+
+---
+
+push them and open stacked PRs when done
+
+---
+
+<agent-message from="fix-select-bins-scale">
+FYI from fix-select-bins-scale agent: the shared CARGO_TARGET_DIR makes all worktrees produce the SAME test binary path (e.g. debug/deps/musicrs-a908c235bd448663, same package hash), and cargo releases the build lock before running tests, so `cargo test` can run ANOTHER agent's binary (I saw my new test missing from the run). Check the test count / names in output, or build with --no-run and copy the executable before running it.
+</agent-message>
+
+---
+
+<task-notification>
+<task-id>af87066f575de68f7</task-id>
+<tool-use-id>repl_c81bc69d-bd55-43a4-bc0f-c4a9d1f0d8cc</tool-use-id>
+<output-file>/tmp/claude-1000/-home-orchid-projects-musicrs/860b07ee-3f92-4815-ab52-690d0ae10c8e/tasks/af87066f575de68f7.output</output-file>
+<status>completed</status>
+<summary>Agent "reject zero sources" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once. One or more messages sent to this agent arrived after this run's last step, too late for the result below. The agent is being resumed with them and will notify again. Wait for that notification before resending.</note>
+<result>Asking for zero sources now returns the new `MusicError::NoSources` error from every function that takes `n_sources`. All three checks pass on the branch.
+
+**Branch:** `fix/zero-sources`, created from 6e41e8b. Nothing was pushed or merged.
+
+**Commit:** `342f2ee` Reject zero sources with MusicError::NoSources
+
+**Results:**
+- `cargo fmt --check`: exit 0, no diffs.
+- `cargo clippy --all-targets -- -D warnings`: finished with no warnings.
+- `cargo test -- --include-ignored`: every suite passed, 0 failed and 0 ignored (42 unit tests, 17 in `errors_test`, and the rest of the integration tests and doc-tests).
+
+**What changed:**
+- **`/home/orchid/projects/musicrs/.claude/worktrees/agent-af87066f575de68f7/src/error.rs`:** added `NoSources` with the doc "`n_sources` must be at least 1" and the message "n_sources must be at least 1".
+- **`/home/orchid/projects/musicrs/.claude/worktrees/agent-af87066f575de68f7/src/music.rs`:** `check_sources` now returns `NoSources` for 0. This covers `estimate_doa`, `estimate_doa_from_real`, `ifb_music_spectrum` and `noise_subspace`. Their "# Errors" docs and the `n_sources` argument doc now mention it.
+- **`/home/orchid/projects/musicrs/.claude/worktrees/agent-af87066f575de68f7/tests/errors_test.rs`:** added a zero-sources check for each of the four functions, next to the existing too-many-sources checks, plus a line in the test that checks every error message.
+- **`/home/orchid/projects/musicrs/.claude/worktrees/agent-af87066f575de68f7/tests/synthetic_test.rs`:** the test `degenerate_configurations_find_nothing` expected `Ok(vec![])` for zero sources. It now expects `Err(MusicError::NoSources)`, and its doc comment says so.
+- **`/home/orchid/projects/musicrs/.claude/worktrees/agent-af87066f575de68f7/CLAUDE.md`:** the `MusicError` description now says "too many or zero sources".
+
+**Decision:** `check_sources` checks for too many sources before checking for zero. An estimator with no antennas and `n_sources = 0` therefore still gets `TooManySources`, so the existing `no_antennas` test and its message are unchanged. The README only refers to `MusicError` in general terms, so I didn't edit it.</result>
+<usage><subagent_tokens>57352</subagent_tokens><tool_uses>46</tool_uses><duration_ms>1265192</duration_ms></usage>
+<worktree><worktreePath>/home/orchid/projects/musicrs/.claude/worktrees/agent-af87066f575de68f7</worktreePath><worktreeBranch>worktree-agent-af87066f575de68f7</worktreeBranch></worktree>
+</task-notification>
