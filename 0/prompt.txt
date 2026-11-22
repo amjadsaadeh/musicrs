@@ -1,0 +1,1 @@
+dont just report the median as wall time, also investigate the type of distribution, give the mean and the stddev so it is possible to estimate the influence of scheduling
