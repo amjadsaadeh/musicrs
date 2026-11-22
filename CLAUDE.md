@@ -28,7 +28,7 @@ cargo doc --open
 ```
 src/
 ├── lib.rs      # Public API exports and crate-level docs
-├── error.rs    # MusicError (returned by every fallible public function) and Result alias
+├── error.rs    # MusicError (returned by every fallible public function) and `musicrs::error::Result` (not re-exported at the root)
 ├── music.rs    # Core MUSIC algorithm (MusicEstimator, spectrum, DOA estimation)
 └── stft.rs     # Signal processing (STFT, analytic signal via Hilbert transform)
 tests/
@@ -55,7 +55,7 @@ docs/benchmark*.svg              # charts shown in the README (light and dark), 
 - `analytic_signal()` — converts real signal to complex via Hilbert transform (FFT-based)
 - `stft()` — Short-Time Fourier Transform with configurable window and overlap
 
-- `MusicError` — bad data (wrong row count, no samples, NaN/inf, silence) and bad parameters (too many sources, `nfft`, overlap, threshold, no usable bins) are returned as `Err`; the public API does not panic on them
+- `MusicError` — bad data (wrong row count or covariance shape, no samples, NaN/inf, silence) and bad parameters (too many sources, angle grid, `nfft`, overlap, threshold, no usable bins) are returned as `Err`; the public API does not panic on them. The angle grid is checked where it is searched, not in `new()`, because the fields are public
 
 **Core algorithm flow:**
 1. Compute covariance matrix of complex multichannel input

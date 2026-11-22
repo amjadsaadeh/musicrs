@@ -96,5 +96,6 @@ impl fmt::Display for MusicError {
 
 impl std::error::Error for MusicError {}
 
-/// `Result` with [`MusicError`] as the error type.
+/// `Result` with [`MusicError`] as the error type. It is not re-exported at the crate
+/// root, so that `use musicrs::*` does not shadow `std::result::Result`.
 pub type Result<T> = std::result::Result<T, MusicError>;
