@@ -736,9 +736,9 @@ impl MusicEstimator {
         bins: Option<&[usize]>,
     ) -> Result<(Vec<f64>, Vec<f64>)> {
         self.check_rows(data.nrows())?;
-        check_real_samples(data)?;
         self.check_sources(n_sources)?;
         self.check_array()?;
+        check_real_samples(data)?;
         if nfft == 0 {
             return Err(MusicError::InvalidNfft);
         }
