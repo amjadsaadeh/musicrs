@@ -85,6 +85,11 @@ thread_local! {
 /// running it a few times, and repeated calls on recordings of one length are the common
 /// case. Only the last [`REAL_PLAN_CACHE_SIZE`] lengths are kept, so that a stream of
 /// different lengths does not keep every plan alive.
+///
+/// Each thread that calls this keeps its plans (their twiddle factors take memory
+/// proportional to the transform length) until the thread exits. With
+/// many long-lived threads on long recordings, that is up to
+/// [`REAL_PLAN_CACHE_SIZE`] plans per thread.
 pub(crate) fn real_fft_plan(n: usize) -> Arc<dyn RealToComplex<f64>> {
     REAL_PLANS.with(|cache| {
         let mut cache = cache.borrow_mut();
@@ -395,5 +400,32 @@ mod tests {
                 .unwrap();
             assert_eq!(peak_bin, target_bin);
         }
+    }
+
+    /// The plan cache returns the cached plan for a repeated length, keeps at most
+    /// `REAL_PLAN_CACHE_SIZE` lengths and evicts the least recently used one.
+    #[test]
+    fn real_fft_plan_cache_reuses_and_evicts() {
+        // Runs on its own test thread, so the thread-local cache starts empty
+        let lengths: Vec<usize> = (1..=REAL_PLAN_CACHE_SIZE).map(|i| 100 + i).collect();
+        let first: Vec<_> = lengths.iter().map(|&n| real_fft_plan(n)).collect();
+        // Every length is cached: the same plan comes back
+        for (n, plan) in lengths.iter().zip(&first) {
+            assert!(
+                Arc::ptr_eq(&real_fft_plan(*n), plan),
+                "length {n} not reused"
+            );
+        }
+        // Touch the first length so the second becomes the least recently used, then add one
+        assert!(Arc::ptr_eq(&real_fft_plan(lengths[0]), &first[0]));
+        real_fft_plan(999);
+        let cached: Vec<usize> = REAL_PLANS.with(|c| c.borrow().iter().map(|p| p.len()).collect());
+        assert_eq!(cached.len(), REAL_PLAN_CACHE_SIZE);
+        assert!(
+            !cached.contains(&lengths[1]),
+            "least recently used length kept: {cached:?}"
+        );
+        assert!(cached.contains(&lengths[0]) && cached.contains(&999));
+        assert_eq!(real_fft_plan(37).len(), 37);
     }
 }

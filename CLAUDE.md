@@ -50,7 +50,7 @@ docs/benchmark*.svg              # charts shown in the README (light and dark), 
 
 **Key types:**
 - `MusicEstimator` — main struct; configure antenna positions, angle search range/step, sample rate, and number of sources
-- `MusicEstimator::estimate_doa_from_real()` — real-data entry point (removes each channel's mean, analytic signal per channel, then `estimate_doa`), like pyMUSIC's `getSourceAngles`. It never forms the analytic signals: their covariance comes from each channel's real FFT by Parseval (`analytic_covariance`), with real FFT plans cached per thread (`stft::real_fft_plan`). The golden/snapshot spectrum tests build their covariance with `analytic_signal` instead, so they do not cover this path; only the DOA-level tests do
+- `MusicEstimator::estimate_doa_from_real()` — real-data entry point (removes each channel's mean, then the covariance of the analytic signals, eigendecomposition, spectrum and peaks as in `estimate_doa`, without calling it), like pyMUSIC's `getSourceAngles`. It never forms the analytic signals: their covariance comes from each channel's real FFT by Parseval (`analytic_covariance`), with real FFT plans cached per thread (`stft::real_fft_plan`). The golden/snapshot spectrum tests build their covariance with `analytic_signal` instead, so they do not cover this path; only the DOA-level tests do
 - `MusicEstimator::ifb_music_spectrum()` — wideband variant; bin frequencies use the estimator's `sample_rate`, so tones above Nyquist cannot be recovered
 - `select_bins_by_energy()` — picks the IFB bins within N dB of the strongest; with `bins = None` noise-only bins dominate the geometric mean
 - `analytic_signal()` — converts real signal to complex via Hilbert transform (FFT-based)

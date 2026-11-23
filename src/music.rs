@@ -339,15 +339,20 @@ fn analytic_covariance(rows: &mut [Vec<f64>]) -> CMatrix {
     cov
 }
 
-/// Checks that real data has samples and that all of them are finite.
-fn check_real_samples(data: &DMatrix<f64>) -> Result<()> {
+/// Checks that real data has samples and that all of them are finite, and returns the
+/// largest magnitude (in the same pass, for callers that scale the data).
+fn check_real_samples(data: &DMatrix<f64>) -> Result<f64> {
     if data.is_empty() {
         return Err(MusicError::EmptyData);
     }
-    if !data.iter().all(|x| x.is_finite()) {
-        return Err(MusicError::NonFiniteData);
+    let mut max_abs = 0.0_f64;
+    for x in data.iter() {
+        if !x.is_finite() {
+            return Err(MusicError::NonFiniteData);
+        }
+        max_abs = max_abs.max(x.abs());
     }
-    Ok(())
+    Ok(max_abs)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -728,13 +733,16 @@ impl MusicEstimator {
 
     /// Estimates DOAs from real-valued microphone data, like pyMUSIC's `getSourceAngles`.
     ///
-    /// Removes each channel's mean, converts each channel to its analytic signal with
-    /// [`analytic_signal`] and then calls [`estimate_doa`](Self::estimate_doa). Without
-    /// the mean removal a DC offset acts as a second source at broadside.
+    /// Removes each channel's mean and estimates the DOAs from the covariance of the
+    /// channels' analytic signals (as [`analytic_signal`] gives them), with the same
+    /// eigendecomposition, spectrum and peak search as [`estimate_doa`](Self::estimate_doa).
+    /// Without the mean removal a DC offset acts as a second source at broadside.
     ///
-    /// The analytic signals are never formed: their covariance is computed directly from the
-    /// real FFT of each channel (by Parseval's theorem), which gives the same covariance up to
-    /// rounding at a fraction of the cost.
+    /// The analytic signals are never formed, and `estimate_doa` is not called: the
+    /// covariance is computed directly from the real FFT of each channel (by Parseval's
+    /// theorem), which gives the same covariance up to rounding at a fraction of the cost.
+    /// The data is scaled by a power of two before that, which is exact, so the covariance
+    /// is not rescaled again as `estimate_doa` does with complex data.
     ///
     /// # Arguments
     /// * `data`      – Real array data (n_antennas × n_samples).
@@ -776,17 +784,7 @@ impl MusicEstimator {
         self.check_sources(n_sources)?;
         self.check_array()?;
         Self::check_frequency(frequency)?;
-        // As check_real_samples, fused with the largest magnitude for the scale
-        if data.is_empty() {
-            return Err(MusicError::EmptyData);
-        }
-        let mut max_abs = 0.0_f64;
-        for x in data.iter() {
-            if !x.is_finite() {
-                return Err(MusicError::NonFiniteData);
-            }
-            max_abs = max_abs.max(x.abs());
-        }
+        let max_abs = check_real_samples(data)?;
         // One contiguous row per channel (`data` is column-major), scaled as
         // [`normalised_real`] does
         let scale = power_of_two_scale(max_abs);
@@ -968,6 +966,44 @@ mod tests {
 
     fn default_est() -> MusicEstimator {
         MusicEstimator::default()
+    }
+
+    // ── analytic_covariance ───────────────────────────────────────────────────
+
+    /// The Parseval covariance must equal `(1/N) Z Zᴴ` of the analytic signals from
+    /// `analytic_signal`, for odd and even lengths (the DC, positive-frequency and Nyquist
+    /// weights differ between them) down to N = 1. The golden and snapshot spectrum tests do
+    /// not run this path, and the DOA-level tests only catch errors that move the peak.
+    #[test]
+    fn analytic_covariance_matches_analytic_signal() {
+        let mut state = 0x2545_f491_4f6c_dd1d_u64;
+        let mut next = || {
+            state = state
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            2.0 * (state >> 11) as f64 / (1u64 << 53) as f64 - 1.0
+        };
+        for n in 1..=40 {
+            let rows: Vec<Vec<f64>> = (0..4).map(|_| (0..n).map(|_| next()).collect()).collect();
+            let z: Vec<Vec<Cplx>> = rows.iter().map(|r| crate::analytic_signal(r)).collect();
+            let expected = CMatrix::from_fn(4, 4, |i, j| {
+                z[i].iter()
+                    .zip(&z[j])
+                    .map(|(a, b)| a * b.conj())
+                    .sum::<Cplx>()
+                    / n as f64
+            });
+            let actual = analytic_covariance(&mut rows.clone());
+            let scale = expected.iter().map(|c| c.norm()).fold(0.0, f64::max);
+            let worst = (&actual - &expected)
+                .iter()
+                .map(|c| c.norm())
+                .fold(0.0, f64::max);
+            assert!(
+                worst <= 1e-12 * scale,
+                "N = {n}: worst difference {worst:e}, largest entry {scale:e}"
+            );
+        }
     }
 
     // ── hermitian_eigen ───────────────────────────────────────────────────────
