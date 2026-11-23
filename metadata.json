@@ -1,0 +1,36 @@
+{
+  "cli_version": "0.13.4",
+  "checkpoint_id": "01M83HFQ00H4KVXSY2ENVMYHBM",
+  "strategy": "manual-commit",
+  "branch": "fix/narrowband-perf",
+  "checkpoints_count": 4,
+  "files_touched": [
+    "Cargo.lock",
+    "Cargo.toml",
+    "src/music.rs",
+    "src/stft.rs"
+  ],
+  "sessions": [
+    {
+      "metadata": "/0/metadata.json",
+      "transcript": "/0/full.jsonl",
+      "compact_transcript": "/0/transcript.jsonl",
+      "content_hash": "/0/content_hash.txt",
+      "prompt": ""
+    }
+  ],
+  "redaction": {
+    "replacements": 19,
+    "layers": {
+      "betterleaks": 0,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 19,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  }
+}
