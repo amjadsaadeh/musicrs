@@ -114,6 +114,35 @@ machine. Machine: Intel N150 (3 cores), Linux, `performance` governor, rustc 1.8
 3.10 / numpy 1.23.5 (OpenBLAS, one thread); see [`bench/`](bench/README.md) for the harnesses
 and how to reproduce, and [`bench/results/`](bench/results/) for the raw samples.
 
+### musicrs over time
+
+The same benchmark at three points in musicrs's history, each a separate run on the same
+machine. Times are mean (median) per call. Separate runs differ by up to ~20 % (see
+*Run to run* below), so only changes well beyond that mean anything.
+
+| Workload | [`b2756f8`](https://github.com/amjadsaadeh/musicrs/commit/b2756f8278c7bf36e28386c87594b274ca8d2b51) | [`4b52605`](https://github.com/amjadsaadeh/musicrs/commit/4b52605f9151899167d8bc147e4d004e8556bfbf) | [`db81fd9`](https://github.com/amjadsaadeh/musicrs/commit/db81fd940f6d08090f0fb057e02a85d528b94247) | numpy (vectorized), latest run |
+|---|---:|---:|---:|---:|
+| Narrowband DOA · 1 s | 5.63 ms (5.41 ms) | 6.29 ms (6.04 ms) | **1.08 ms (1.07 ms)** | 3.28 ms |
+| Narrowband DOA · 2 s | 11.7 ms (11.5 ms) | 13.4 ms (13.0 ms) | **2.66 ms (2.48 ms)** | 5.47 ms |
+| IFB-MUSIC, 1 bin · 1 s | 757 µs (770 µs) | 1.12 ms (1.10 ms) | 1.17 ms (1.16 ms) | 552 µs |
+| IFB-MUSIC, 1 bin · 2 s | 1.24 ms (1.22 ms) | 2.48 ms (2.50 ms) | 2.15 ms (2.11 ms) | 922 µs |
+| IFB-MUSIC, 80 bins · 1 s | 14.7 ms (14.5 ms) | 5.43 ms (5.46 ms) | 4.75 ms (4.45 ms) | 18.7 ms |
+
+- [`b2756f8`](https://github.com/amjadsaadeh/musicrs/commit/b2756f8278c7bf36e28386c87594b274ca8d2b51): the first benchmark. Its results were committed with that commit;
+  which code they were measured on was not recorded.
+- [`4b52605`](https://github.com/amjadsaadeh/musicrs/commit/4b52605f9151899167d8bc147e4d004e8556bfbf): `main` after #23–#29. Among other changes, IFB-MUSIC builds its
+  cross-spectral matrices one bin at a time (#23) and the channels share one FFT planner (#26).
+  Over 80 bins IFB-MUSIC became ~3× faster, while single-bin IFB-MUSIC became 1.5–2× slower.
+  That slowdown has not been profiled.
+- [`db81fd9`](https://github.com/amjadsaadeh/musicrs/commit/db81fd940f6d08090f0fb057e02a85d528b94247): narrowband DOA computes the covariance from real FFTs (#34), and
+  `spectrum` no longer allocates per angle. Narrowband DOA is 5–6× faster than at
+  [`4b52605`](https://github.com/amjadsaadeh/musicrs/commit/4b52605f9151899167d8bc147e4d004e8556bfbf).
+
+The raw samples of each run are in the repository, e.g.
+`git show d53ba39:bench/results/musicrs.csv` (run on [`4b52605`](https://github.com/amjadsaadeh/musicrs/commit/4b52605f9151899167d8bc147e4d004e8556bfbf)) and
+`git show a8d2fe3:bench/results/musicrs.csv` (run on [`db81fd9`](https://github.com/amjadsaadeh/musicrs/commit/db81fd940f6d08090f0fb057e02a85d528b94247)); `bench/results/environment.txt`
+in the same commit records the machine and the musicrs commit.
+
 ### Distribution of the timings
 
 <picture>

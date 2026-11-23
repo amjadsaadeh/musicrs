@@ -80,4 +80,6 @@ uv run --python 3.12 --with numpy --with scipy --with matplotlib \
 `analyze.py` writes `bench/results/summary.{csv,md}` and the charts in `docs/`.
 `bench/results/environment.txt` records the machine and the musicrs commit the committed
 results come from; re-run all three after a change to musicrs, so the README never compares
-one implementation's old numbers with another's new ones.
+one implementation's old numbers with another's new ones. After a re-run, add a column for
+the new musicrs commit to *musicrs over time* in the README, linking the commit the results
+were measured on (`environment.txt`).
