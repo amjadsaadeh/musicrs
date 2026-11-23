@@ -1,4 +1,4 @@
-musicrs: db81fd9 (bench/ changes aside, the code the results were measured on)
+musicrs: 3e2b808 (bench/ changes aside, the code the results were measured on)
 CPU: Intel(R) N150, 3 cores
 Kernel: Linux 7.0.14-12-pve
 rustc 1.88.0 (6b00bc388 2025-06-23)
