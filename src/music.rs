@@ -486,6 +486,14 @@ impl MusicEstimator {
     /// }
     /// ```
     pub fn steering_vector(&self, angle: f64, frequency: f64) -> CVec {
+        let mut out = vec![Cplx::new(0.0, 0.0); self.n_antennas()];
+        self.steering_vector_into(angle, frequency, &mut out);
+        CVec::from_vec(out)
+    }
+
+    /// [`steering_vector`](Self::steering_vector) written into `out` (one element per
+    /// antenna), so that the spectrum does not allocate a vector per angle.
+    fn steering_vector_into(&self, angle: f64, frequency: f64, out: &mut [Cplx]) {
         let dir = [angle.cos(), angle.sin()];
         // For f < Nyquist (sr/2): analytic signal has positive phase → use +exponent.
         // For f > Nyquist: signal aliases in the one-sided FFT; dominant eigenvector
@@ -499,19 +507,16 @@ impl MusicEstimator {
             1.0_f64
         };
         let at_nyquist = (frequency - nyquist).abs() < 0.5;
-        CVec::from_iterator(
-            self.n_antennas(),
-            self.antenna_positions.iter().map(|p| {
-                let delay = (p[0] * dir[0] + p[1] * dir[1]) / SPEED_OF_SOUND;
-                let phase = phase_sign * 2.0 * PI * frequency * delay;
-                if at_nyquist {
-                    // Real steering vector: imaginary part is zero
-                    Cplx::new(phase.cos(), 0.0)
-                } else {
-                    Cplx::from_polar(1.0, phase)
-                }
-            }),
-        )
+        for (element, p) in out.iter_mut().zip(&self.antenna_positions) {
+            let delay = (p[0] * dir[0] + p[1] * dir[1]) / SPEED_OF_SOUND;
+            let phase = phase_sign * 2.0 * PI * frequency * delay;
+            *element = if at_nyquist {
+                // Real steering vector: imaginary part is zero
+                Cplx::new(phase.cos(), 0.0)
+            } else {
+                Cplx::from_polar(1.0, phase)
+            };
+        }
     }
 
     /// Extracts the noise subspace from the Hermitian covariance matrix `cov`.
@@ -575,12 +580,22 @@ impl MusicEstimator {
         self.check_array()?;
         Self::check_frequency(frequency)?;
         let angles = self.angle_grid()?;
+        let mut a = vec![Cplx::new(0.0, 0.0); self.n_antennas()];
         let scores: Vec<f64> = angles
             .iter()
             .map(|&theta| {
-                let a = self.steering_vector(theta, frequency);
-                let en_a = noise_mat.adjoint() * &a; // (n_noise × 1)
-                let denom = en_a.norm_squared();
+                self.steering_vector_into(theta, frequency, &mut a);
+                // ‖Eₙᴴ a‖²: one inner product per noise eigenvector (column of noise_mat)
+                let denom: f64 = noise_mat
+                    .column_iter()
+                    .map(|e| {
+                        e.iter()
+                            .zip(&a)
+                            .map(|(e, a)| e.conj() * a)
+                            .sum::<Cplx>()
+                            .norm_sqr()
+                    })
+                    .sum();
                 if denom == 0.0 {
                     f64::INFINITY
                 } else {
