@@ -1,0 +1,84 @@
+{
+  "cli_version": "0.13.4",
+  "checkpoint_id": "01M848ZKWEJBK9RW6H86X7BTAB",
+  "session_id": "e4ed0d44-855e-43d7-a469-c239c977daef",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-23T13:19:35.584787969Z",
+  "branch": "fix/narrowband-perf",
+  "checkpoints_count": 2,
+  "files_touched": [
+    "README.md",
+    "bench/results/environment.txt"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-opus-5-5",
+  "turn_id": "720964e9104f",
+  "checkpoint_transcript_start": 2854,
+  "transcript_lines_at_start": 2854,
+  "compact_transcript_start": 416,
+  "token_usage": {
+    "input_tokens": 22,
+    "cache_creation_tokens": 65690,
+    "cache_read_tokens": 588124,
+    "output_tokens": 4425,
+    "api_call_count": 9
+  },
+  "session_token_usage": {
+    "input_tokens": 206,
+    "cache_creation_tokens": 680155,
+    "cache_read_tokens": 12894415,
+    "output_tokens": 120209,
+    "api_call_count": 94
+  },
+  "redaction": {
+    "replacements": 28,
+    "layers": {
+      "betterleaks": 0,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 34,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "skill_events_version": 1,
+  "skill_events": [
+    {
+      "id": "claude-skill-repl_87ef9c9e-8fa4-4cb0-9415-145feff49c3f",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "dataviz"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "5dc67d86dee9",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 494,
+        "end": 495,
+        "entry_ids": [
+          "9113ca2b-7c6d-4c56-927c-bf5990338de7"
+        ],
+        "tool_use_id": "repl_87ef9c9e-8fa4-4cb0-9415-145feff49c3f"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "repl_87ef9c9e-8fa4-4cb0-9415-145feff49c3f"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: dataviz",
+        "default_collapsed": true
+      }
+    }
+  ],
+  "session_metrics": {
+    "turn_count": 9
+  }
+}
