@@ -1,6 +1,10 @@
 //! Short-Time Fourier Transform and analytic signal computation.
 
+use std::cell::RefCell;
+use std::sync::Arc;
+
 use num_complex::Complex;
+use realfft::{RealFftPlanner, RealToComplex};
 use rustfft::FftPlanner;
 
 use crate::error::{MusicError, Result};
@@ -65,6 +69,37 @@ pub(crate) fn analytic_signal_with(
     // Normalise
     let norm = n as f64;
     spectrum.iter().map(|c| c / norm).collect()
+}
+
+/// How many real FFT plans [`real_fft_plan`] keeps per thread.
+const REAL_PLAN_CACHE_SIZE: usize = 4;
+
+thread_local! {
+    /// The most recently used real forward FFT plans of this thread, most recent last.
+    static REAL_PLANS: RefCell<Vec<Arc<dyn RealToComplex<f64>>>> = const { RefCell::new(Vec::new()) };
+}
+
+/// A real forward FFT plan of length `n`, reused across calls on the same thread.
+///
+/// Planning a long transform (and computing its twiddle factors) costs about as much as
+/// running it a few times, and repeated calls on recordings of one length are the common
+/// case. Only the last [`REAL_PLAN_CACHE_SIZE`] lengths are kept, so that a stream of
+/// different lengths does not keep every plan alive.
+pub(crate) fn real_fft_plan(n: usize) -> Arc<dyn RealToComplex<f64>> {
+    REAL_PLANS.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        let plan = match cache.iter().position(|p| p.len() == n) {
+            Some(i) => cache.remove(i),
+            None => {
+                if cache.len() == REAL_PLAN_CACHE_SIZE {
+                    cache.remove(0);
+                }
+                RealFftPlanner::<f64>::new().plan_fft_forward(n)
+            }
+        };
+        cache.push(Arc::clone(&plan));
+        plan
+    })
 }
 
 /// Computes the Short-Time Fourier Transform of a real-valued signal.
