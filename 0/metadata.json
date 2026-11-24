@@ -1,0 +1,73 @@
+{
+  "cli_version": "0.13.4",
+  "checkpoint_id": "01M875T1W71KYCDAH21PZ2PQR2",
+  "session_id": "f351142b-2bd5-4ca1-b6cb-1486ddf7f149",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-24T16:21:47.86703473Z",
+  "branch": "feat/golden-cases-2",
+  "checkpoints_count": 1,
+  "save_step_count": 1,
+  "files_touched": [
+    "examples/bench_pymusic.rs"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-opus-5-5",
+  "turn_id": "eba62d150a4a",
+  "compact_transcript_start": 0,
+  "token_usage": {
+    "input_tokens": 8,
+    "cache_creation_tokens": 9308,
+    "cache_read_tokens": 486520,
+    "output_tokens": 2789,
+    "api_call_count": 4
+  },
+  "session_token_usage": {
+    "input_tokens": 84,
+    "cache_creation_tokens": 110846,
+    "cache_read_tokens": 3567798,
+    "output_tokens": 31653,
+    "api_call_count": 41
+  },
+  "redaction": {
+    "replacements": 9,
+    "layers": {
+      "betterleaks": 0,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 9,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "skill_events_version": 1,
+  "skill_events": [
+    {
+      "id": "prompt-skill-claude-code-review-2026-11-22T11:18:11.265987345Z",
+      "event_type": "prompt_invocation",
+      "skill": {
+        "name": "review"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "prompt_slash_command",
+        "confidence": "explicit"
+      },
+      "turn_id": "720f4facdd15",
+      "timestamp": "2026-11-22T11:18:11.265987345Z",
+      "native": {
+        "command": "/review"
+      },
+      "collapse": {
+        "target": "user_message",
+        "label": "/review",
+        "default_collapsed": true
+      }
+    }
+  ],
+  "session_metrics": {
+    "turn_count": 3
+  }
+}

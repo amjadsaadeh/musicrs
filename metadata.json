@@ -1,0 +1,40 @@
+{
+  "cli_version": "0.13.4",
+  "checkpoint_id": "01M875T1W71KYCDAH21PZ2PQR2",
+  "strategy": "manual-commit",
+  "branch": "feat/golden-cases-2",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "examples/bench_pymusic.rs"
+  ],
+  "sessions": [
+    {
+      "metadata": "/0/metadata.json",
+      "transcript": "/0/full.jsonl",
+      "compact_transcript": "/0/transcript.jsonl",
+      "content_hash": "/0/content_hash.txt",
+      "prompt": "/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 8,
+    "cache_creation_tokens": 9308,
+    "cache_read_tokens": 486520,
+    "output_tokens": 2789,
+    "api_call_count": 4
+  },
+  "redaction": {
+    "replacements": 9,
+    "layers": {
+      "betterleaks": 0,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 9,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  }
+}
