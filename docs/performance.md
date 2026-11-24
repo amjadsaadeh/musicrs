@@ -19,11 +19,16 @@ runs, so treat them as proportions, accurate to about ±30 %, not as exact costs
 | Stage | numpy | musicrs |
 |---|---:|---:|
 | Input check, scaling to a power of two, splitting into channels | — | ~16 µs + ~130 µs |
+| Removing each channel's mean (compensated sum), energy for the silence check | — | ~155 µs |
 | Analytic signal: complex FFT + inverse FFT per channel (numpy) / real FFT per channel (musicrs) | ~2.5 ms | ~0.32 ms |
 | Covariance: 16 000-sample matrix product (numpy) / sum over 8 001 bins (musicrs) | ~0.36 ms | ~0.10 ms |
 | Eigendecomposition, 4×4 | ~34 µs | ~3 µs |
 | Spectrum, 720 angles | ~160 µs | ~110 µs |
 | **Whole call (benchmark mean)** | **3.38 ms** | **0.97 ms** |
+
+The listed stages add up to about 3.05 ms for numpy and 0.83 ms for musicrs. The rest
+(allocating the per-channel buffers, the peak search, and the difference between the busier
+harness runs and the benchmark) is not broken down further.
 
 ### IFB-MUSIC, one bin (1 s recording, `nfft` 160)
 
@@ -142,13 +147,18 @@ Measured back to back:
 | bins 1..=80 | ~17.9 ms (80 processed) | ~3.3 ms (20 processed) |
 | the 20 active bins only | ~4.7 ms | ~3.2 ms |
 
-On the same 20 bins musicrs is about **1.5× faster** (about 130 µs vs 220 µs per processed
-bin), not the 6.3× of the 80-bin row. Most of that 6.3× comes from doing a quarter of the
+On the same 20 bins musicrs is about **1.5× faster**, not the 6.3× of the 80-bin row. Per
+processed bin that is about 160 µs vs 235 µs (whole call divided by 20), or about 130 µs vs
+220 µs once each call's fixed cost (input handling and STFT: about 0.5 ms for musicrs,
+0.3 ms for numpy) is subtracted. Most of that 6.3× comes from doing a quarter of the
 work. A fair comparison would use a recording with broadband noise, or have the numpy
 baseline skip silent bins too.
 
 ## What is left
 
+- **Mean removal in narrowband DOA.** Neumaier's compensated sum is a serial chain like the
+  old max fold (~155 µs for four channels). Independent lanes, each compensated, would keep
+  its accuracy and let it vectorize.
 - **Read STFT windows straight from the column-major input.** Splitting into channels
   (`scaled_rows`, one `push` per sample) takes ~130 µs. Writing into zeroed rows with a
   strided iterator measured ~85 µs, and skipping the copy entirely for IFB would save all of
