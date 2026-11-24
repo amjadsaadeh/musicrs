@@ -117,6 +117,11 @@ pub(crate) fn real_fft_plan(n: usize) -> Arc<dyn RealToComplex<f64>> {
 /// * `nfft`       – Window (FFT) size.
 /// * `no_overlap` – Number of samples shared between consecutive windows.
 ///
+/// The FFT plan for `nfft` is kept in a per-thread cache of the last 4 transform lengths
+/// (shared with [`MusicEstimator`](crate::MusicEstimator)), so repeated calls do not plan
+/// again. A cached plan holds memory proportional to its length until it is evicted or the
+/// thread exits.
+///
 /// # Errors
 /// [`MusicError::InvalidNfft`] if `nfft` is 0, [`MusicError::InvalidOverlap`] if
 /// `no_overlap >= nfft`, then [`MusicError::DataShorterThanWindow`] if `data` is shorter
