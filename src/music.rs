@@ -224,20 +224,18 @@ pub fn select_bins_by_energy(
     if nfft == 1 {
         return Err(MusicError::NoUsableBins);
     }
-    check_real_samples(data)?;
+    let max_abs = check_real_samples(data)?;
     if data.ncols() < nfft {
         return Err(MusicError::DataShorterThanWindow {
             nfft,
             samples: data.ncols(),
         });
     }
-    // Without this, the power sums underflow to 0 for very quiet data (SilentData) and
-    // overflow to infinity for very loud data (every bin selected).
-    let data = &normalised_real(data);
+    // Scaled: without this, the power sums underflow to 0 for very quiet data (SilentData)
+    // and overflow to infinity for very loud data (every bin selected).
     let mut power = vec![0.0; nfft / 2 + 1];
     let mut planner = FftPlanner::new();
-    for m in 0..data.nrows() {
-        let row: Vec<f64> = data.row(m).iter().copied().collect();
+    for row in scaled_rows(data, max_abs) {
         for (p, bin) in power
             .iter_mut()
             .zip(stft_with(&row, nfft, 0, &mut planner)?)
@@ -266,9 +264,21 @@ fn power_of_two_scale(max_abs: f64) -> f64 {
     }
 }
 
-/// `data` divided by [`power_of_two_scale`] of its largest absolute value.
-fn normalised_real(data: &DMatrix<f64>) -> DMatrix<f64> {
-    data / power_of_two_scale(data.amax())
+/// One contiguous row per channel of the column-major `data`, divided by
+/// [`power_of_two_scale`] of `max_abs` (its largest absolute value, from
+/// [`check_real_samples`]).
+///
+/// Multiplying by the reciprocal gives the same values as dividing: both are powers of two
+/// in the normal range, so the reciprocal is exact and both round the same exact quotient.
+fn scaled_rows(data: &DMatrix<f64>, max_abs: f64) -> Vec<Vec<f64>> {
+    let factor = 1.0 / power_of_two_scale(max_abs);
+    let mut rows = vec![Vec::with_capacity(data.ncols()); data.nrows()];
+    for column in data.as_slice().chunks_exact(data.nrows()) {
+        for (row, &x) in rows.iter_mut().zip(column) {
+            row.push(x * factor);
+        }
+    }
+    rows
 }
 
 /// The mean of `values`, summed with Neumaier's compensated summation so that it is
@@ -345,14 +355,29 @@ fn check_real_samples(data: &DMatrix<f64>) -> Result<f64> {
     if data.is_empty() {
         return Err(MusicError::EmptyData);
     }
-    let mut max_abs = 0.0_f64;
-    for x in data.iter() {
-        if !x.is_finite() {
-            return Err(MusicError::NonFiniteData);
+    // Independent lanes, so that the loop vectorizes: a single running `f64::max` is a
+    // serial chain of dependent operations. `x * 0` is 0 for finite x and NaN for NaN and
+    // ±inf, and a NaN stays in its lane's sum.
+    const LANES: usize = 8;
+    let mut max = [0.0_f64; LANES];
+    let mut non_finite = [0.0_f64; LANES];
+    let (chunks, tail) = data.as_slice().as_chunks::<LANES>();
+    for chunk in chunks {
+        for ((m, bad), &x) in max.iter_mut().zip(&mut non_finite).zip(chunk) {
+            let a = x.abs();
+            *m = if a > *m { a } else { *m };
+            *bad += x * 0.0;
         }
-        max_abs = max_abs.max(x.abs());
     }
-    Ok(max_abs)
+    for ((m, bad), &x) in max.iter_mut().zip(&mut non_finite).zip(tail) {
+        let a = x.abs();
+        *m = if a > *m { a } else { *m };
+        *bad += x * 0.0;
+    }
+    if non_finite.iter().any(|b| b.is_nan()) {
+        return Err(MusicError::NonFiniteData);
+    }
+    Ok(max.into_iter().fold(0.0, f64::max))
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -785,15 +810,7 @@ impl MusicEstimator {
         self.check_array()?;
         Self::check_frequency(frequency)?;
         let max_abs = check_real_samples(data)?;
-        // One contiguous row per channel (`data` is column-major), scaled as
-        // [`normalised_real`] does
-        let scale = power_of_two_scale(max_abs);
-        let mut rows = vec![vec![0.0; data.ncols()]; data.nrows()];
-        for (t, column) in data.column_iter().enumerate() {
-            for (row, x) in rows.iter_mut().zip(column.iter()) {
-                row[t] = x / scale;
-            }
-        }
+        let mut rows = scaled_rows(data, max_abs);
         let (mut raw_energy, mut centred_energy) = (0.0, 0.0);
         for row in &mut rows {
             let mean = accurate_mean(row.iter());
@@ -854,7 +871,7 @@ impl MusicEstimator {
         self.check_rows(data.nrows())?;
         self.check_sources(n_sources)?;
         self.check_array()?;
-        check_real_samples(data)?;
+        let max_abs = check_real_samples(data)?;
         if nfft == 0 {
             return Err(MusicError::InvalidNfft);
         }
@@ -864,7 +881,6 @@ impl MusicEstimator {
                 samples: data.ncols(),
             });
         }
-        let data = &normalised_real(data);
         let n_mics = data.nrows();
         let freq_bins = nfft / 2 + 1;
 
@@ -885,11 +901,9 @@ impl MusicEstimator {
 
         // STFT per microphone channel, all sharing one FFT plan
         let mut planner = FftPlanner::new();
-        let stfts: Vec<Vec<Vec<Cplx>>> = (0..n_mics)
-            .map(|m| {
-                let row: Vec<f64> = data.row(m).iter().copied().collect();
-                stft_with(&row, nfft, 0, &mut planner)
-            })
+        let stfts: Vec<Vec<Vec<Cplx>>> = scaled_rows(data, max_abs)
+            .iter()
+            .map(|row| stft_with(row, nfft, 0, &mut planner))
             .collect::<Result<_>>()?;
         let n_windows = stfts[0][0].len();
 
@@ -966,6 +980,53 @@ mod tests {
 
     fn default_est() -> MusicEstimator {
         MusicEstimator::default()
+    }
+
+    // ── check_real_samples / scaled_rows ──────────────────────────────────────
+
+    /// A NaN or ±inf anywhere (in every lane and in the tail after the last full chunk of
+    /// lanes) is found, and the largest magnitude is found wherever it is.
+    #[test]
+    fn check_real_samples_finds_non_finite_and_max_everywhere() {
+        for n in 1..=21 {
+            for pos in 0..n {
+                for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+                    let mut v = vec![0.5; n];
+                    v[pos] = bad;
+                    let data = DMatrix::from_vec(1, n, v);
+                    assert_eq!(
+                        check_real_samples(&data),
+                        Err(MusicError::NonFiniteData),
+                        "n = {n}, pos = {pos}, value = {bad}"
+                    );
+                }
+                let mut v = vec![0.5; n];
+                v[pos] = -3.0;
+                assert_eq!(check_real_samples(&DMatrix::from_vec(1, n, v)), Ok(3.0));
+            }
+        }
+        assert_eq!(check_real_samples(&DMatrix::zeros(4, 3)), Ok(0.0));
+        assert_eq!(
+            check_real_samples(&DMatrix::zeros(4, 0)),
+            Err(MusicError::EmptyData)
+        );
+    }
+
+    /// `scaled_rows` splits the column-major matrix into rows and gives exactly
+    /// `x / power_of_two_scale(max_abs)`, also for subnormal and huge values.
+    #[test]
+    fn scaled_rows_matches_division() {
+        for scale in [1e-310, 1e-300, 1e-5, 1.0, 3.0, 1e300] {
+            let data = DMatrix::from_fn(3, 7, |i, t| scale * ((i * 7 + t) as f64 - 9.5) / 3.0);
+            let max_abs = check_real_samples(&data).unwrap();
+            let divisor = power_of_two_scale(max_abs);
+            let rows = scaled_rows(&data, max_abs);
+            assert_eq!(rows.len(), 3);
+            for (i, row) in rows.iter().enumerate() {
+                let expected: Vec<f64> = data.row(i).iter().map(|x| x / divisor).collect();
+                assert_eq!(row, &expected, "scale {scale}, row {i}");
+            }
+        }
     }
 
     // ── analytic_covariance ───────────────────────────────────────────────────
