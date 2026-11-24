@@ -1,0 +1,1 @@
+well summarize all "tricks" to achive faster processing and why it is faster or on par with the vectorized numpy version. Put this into a new pr
