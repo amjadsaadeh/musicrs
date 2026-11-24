@@ -103,7 +103,7 @@ Test data covers:
 
 ## Notes
 
-- Rust edition 2024, MSRV follows current stable toolchain
+- Rust edition 2024; `rust-version` in `Cargo.toml` (1.89, set by `nalgebra` 0.35) is the lowest Rust the crate builds with. Raise it when code or a dependency update needs a newer Rust
 - No `rustfmt.toml` or `clippy.toml` — use `cargo fmt` and `cargo clippy` defaults
 - Golden files: `*.eigh.csv` (pyMUSIC with `np.linalg.eigh`) and `*.hilbert_n<N>.scipy.csv` (`scipy.signal.hilbert`) must match value-by-value; `*.eig.csv` (pyMUSIC as published) only by peak location, because `np.linalg.eig` returns a non-orthogonal noise basis on this near-noiseless data. Regenerate with the command in `tests/golden/generate_golden.py`.
 - Snapshot files: `*.narrowband.musicrs.csv` in `tests/golden/` are musicrs's own narrowband spectra at and above Nyquist (8000 Hz, 9100 Hz), not pyMUSIC references (musicrs deliberately differs from pyMUSIC there). They pin the at/above-Nyquist steering-vector behaviour: `1 / spectrum` (the MUSIC denominator) must match to 1e-9 of its maximum and the peak must not move. The spectrum itself is not compared relatively, because at the peaks its denominator is at rounding level and moves with the eigensolver. After an intended change, regenerate with `MUSICRS_UPDATE_SNAPSHOTS=1 cargo test --test golden_test` and review the diff.
