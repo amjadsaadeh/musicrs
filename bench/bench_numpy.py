@@ -21,7 +21,7 @@ written the way numpy is meant to be used, as the baseline musicrs should be mea
 
 numpy is limited to one thread (musicrs is single-threaded). Before timing, every workload is
 checked against pyMUSIC itself on the same recording: same peak angle, spectrum within a
-relative 1e-6. The workloads, sample counts and CSV format mirror bench_pymusic.py and
+relative 1e-6 (narrowband: also the covariance, built from pySoundToolbox's analytic signal). The workloads, sample counts and CSV format mirror bench_pymusic.py and
 examples/bench_pymusic.rs; see bench/README.md.
 """
 
@@ -81,11 +81,15 @@ def analytic_signal(data):
     return np.fft.ifft(np.fft.fft(data, axis=1) * h, axis=1).conj()
 
 
+def covariance(data):
+    """As MUSICEst.getSourceAngles: covariance of the channels' analytic signals."""
+    a = analytic_signal(data)
+    return a @ a.conj().T / data.shape[1]
+
+
 def source_angles(data, n_sources, frequency):
     """As MUSICEst.getSourceAngles for one source: the angle of the first maximum."""
-    a = analytic_signal(data)
-    cov = a @ a.conj().T / data.shape[1]
-    spec, angles = spectrum(noise_mat(cov, n_sources), frequency)
+    spec, angles = spectrum(noise_mat(covariance(data), n_sources), frequency)
     return angles[np.argsort(-spec, kind="stable")[:n_sources]]
 
 
@@ -145,11 +149,18 @@ def check_parity(pymusic, name, data):
         mirror = np.mod(2 * np.pi - got, 2 * np.pi)
         assert np.allclose(ref, got) or np.allclose(ref, mirror), \
             f"{name}: pyMUSIC {np.degrees(ref)}, numpy {np.degrees(got)}"
-        # The angle alone could agree by chance: compare the spectra too
-        a = analytic_signal(data)
-        nm = est.getNoiseMat(np.matrix(a @ a.conj().T / data.shape[1]), 1)
-        ref_spec, _ = est.getSpectrum(nm, FREQ)
-        got_spec, _ = spectrum(noise_mat(a @ a.conj().T / data.shape[1], 1), FREQ)
+        # The angle alone could agree by chance (and accepts the mirror angle): compare the
+        # covariance and the spectrum too. The reference covariance is built as
+        # getSourceAngles builds it, from pySoundToolbox's genAnalyticSignal, so a mistake in
+        # analytic_signal (a missing conjugate would mirror the spectrum) cannot pass.
+        gen = sys.modules["pySoundToolbox.pySoundToolbox"].genAnalyticSignal
+        a = np.array([gen(row) for row in data])
+        ref_cov = a @ a.conj().T / data.shape[1]
+        got_cov = covariance(data)
+        cov_rel = float(np.max(np.abs(got_cov - ref_cov)) / np.max(np.abs(ref_cov)))
+        assert cov_rel < 1e-12, f"{name}: covariance rel. diff {cov_rel}"
+        ref_spec, _ = est.getSpectrum(est.getNoiseMat(np.matrix(ref_cov), 1), FREQ)
+        got_spec, _ = spectrum(noise_mat(got_cov, 1), FREQ)
     else:
         bins = BINS[name]
         ref_spec, _ = pymusic.IFBMUSICSpectrum(data, est.antennaPositions, NFFT, bins=bins)

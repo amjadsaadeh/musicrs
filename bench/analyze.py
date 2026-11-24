@@ -58,7 +58,7 @@ THEMES = {
                   numpy="#1baf7a"),
     "dark": dict(surface="#1a1a19", ink="#f0efec", ink2="#c3c2b7", muted="#898781",
                  grid="#2c2c2a", axis="#383835", musicrs="#3987e5", pymusic="#d95926",
-                  numpy="#199e70"),
+                 numpy="#199e70"),
 }
 
 

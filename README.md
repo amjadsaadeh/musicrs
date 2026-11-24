@@ -67,7 +67,8 @@ result, in three implementations:
   ([`bench/bench_numpy.py`](bench/bench_numpy.py)): the same analytic signal,
   `np.linalg.eig` and steering vectors, but in `float64`, with all 720 angles in one array
   operation, on one thread. Before timing, its spectra are checked against pyMUSIC's (relative
-  difference below 1e-7, same peak);
+  difference below 1e-7, same peak), and for narrowband DOA also the covariance, built with
+  pySoundToolbox's analytic signal as pyMUSIC does;
 - **musicrs**, single-threaded.
 
 **Against pyMUSIC, musicrs is 61× to 2,447× faster, but that is not a Rust-vs-Python

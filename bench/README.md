@@ -15,7 +15,8 @@ top-level README, section *Performance vs pyMUSIC and numpy*.
   (nothing is cached between calls). It runs on one BLAS thread, as musicrs runs on one
   thread. Before timing each case, it checks its result against pyMUSIC's on the same
   recording (spectrum within a relative 1e-6, same peak up to the θ / 2π − θ ambiguity of the
-  linear array) and stops if they differ.
+  linear array; for `narrowband` also the covariance, within a relative 1e-12 of the one
+  pyMUSIC builds from pySoundToolbox's `genAnalyticSignal`) and stops if they differ.
 - **musicrs** (`examples/bench_pymusic.rs`).
 
 ## Workloads
