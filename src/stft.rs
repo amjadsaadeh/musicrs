@@ -146,17 +146,6 @@ pub(crate) fn real_fft_plan(n: usize) -> Arc<dyn RealToComplex<f64>> {
 /// # Ok::<(), musicrs::MusicError>(())
 /// ```
 pub fn stft(data: &[f64], nfft: usize, no_overlap: usize) -> Result<Vec<Vec<Complex<f64>>>> {
-    stft_with(data, nfft, no_overlap, &mut FftPlanner::new())
-}
-
-/// [`stft`] with a caller-owned planner, so that several signals (one per channel) share
-/// its cached FFT plan instead of rebuilding it.
-pub(crate) fn stft_with(
-    data: &[f64],
-    nfft: usize,
-    no_overlap: usize,
-    planner: &mut FftPlanner<f64>,
-) -> Result<Vec<Vec<Complex<f64>>>> {
     if nfft == 0 {
         return Err(MusicError::InvalidNfft);
     }
@@ -173,8 +162,12 @@ pub(crate) fn stft_with(
 
     let step = nfft - no_overlap;
     let freq_bins = nfft / 2 + 1;
-    // Use real-to-complex FFT plan (standard forward FFT on real-padded input)
-    let fft = planner.plan_fft_forward(nfft);
+    // Real-to-complex FFT: bins 0..=nfft/2 of the complex FFT, at about half the cost.
+    // The plan and the buffers are reused for every window.
+    let fft = real_fft_plan(nfft);
+    let mut input = fft.make_input_vec();
+    let mut spectrum = fft.make_output_vec();
+    let mut scratch = fft.make_scratch_vec();
 
     let num_windows = (data.len() - nfft) / step + 1;
 
@@ -183,14 +176,11 @@ pub(crate) fn stft_with(
         vec![vec![Complex::new(0.0, 0.0); num_windows]; freq_bins];
 
     for (win_idx, start) in (0..).zip((0..).step_by(step).take(num_windows)) {
-        let end = start + nfft;
-        let mut buf: Vec<Complex<f64>> = data[start..end]
-            .iter()
-            .map(|&x| Complex::new(x, 0.0))
-            .collect();
-        fft.process(&mut buf);
-        for bin in 0..freq_bins {
-            result[bin][win_idx] = buf[bin];
+        input.copy_from_slice(&data[start..start + nfft]);
+        fft.process_with_scratch(&mut input, &mut spectrum, &mut scratch)
+            .expect("buffer lengths come from the plan");
+        for (bin, &value) in result.iter_mut().zip(&spectrum) {
+            bin[win_idx] = value;
         }
     }
 
@@ -283,11 +273,41 @@ mod tests {
         for seed in 0..3 {
             let x = noise(255, 100 + seed);
             assert_eq!(analytic_signal_with(&x, &mut planner), analytic_signal(&x));
-            assert_eq!(
-                stft_with(&x, 32, 8, &mut planner),
-                stft(&x, 32, 8),
-                "seed {seed}"
-            );
+        }
+    }
+
+    /// Each STFT column is bins 0..=nfft/2 of the complex FFT of its window, for even and
+    /// odd `nfft` (with and without a Nyquist bin) and with overlap.
+    #[test]
+    fn stft_matches_complex_fft_of_each_window() {
+        let x = noise(500, 7);
+        for (nfft, overlap) in [
+            (1, 0),
+            (2, 0),
+            (7, 3),
+            (32, 0),
+            (33, 8),
+            (160, 0),
+            (160, 80),
+        ] {
+            let result = stft(&x, nfft, overlap).unwrap();
+            assert_eq!(result.len(), nfft / 2 + 1);
+            let fft = FftPlanner::<f64>::new().plan_fft_forward(nfft);
+            let step = nfft - overlap;
+            for w in 0..result[0].len() {
+                let mut buf: Vec<Complex<f64>> = x[w * step..w * step + nfft]
+                    .iter()
+                    .map(|&v| Complex::new(v, 0.0))
+                    .collect();
+                fft.process(&mut buf);
+                for (k, bin) in result.iter().enumerate() {
+                    let diff = (bin[w] - buf[k]).norm();
+                    assert!(
+                        diff < 1e-12 * nfft as f64,
+                        "nfft {nfft}, overlap {overlap}, window {w}, bin {k}: diff {diff}"
+                    );
+                }
+            }
         }
     }
 

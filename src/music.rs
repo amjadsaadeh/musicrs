@@ -5,10 +5,9 @@ use std::f64::consts::PI;
 use nalgebra::DMatrix;
 use nalgebra::DVector;
 use num_complex::Complex;
-use rustfft::FftPlanner;
 
 use crate::error::{MusicError, Result};
-use crate::stft::{real_fft_plan, stft_with};
+use crate::stft::{real_fft_plan, stft};
 
 /// Speed of sound in air at ~20 °C, in metres per second.
 const SPEED_OF_SOUND: f64 = 343.2;
@@ -234,12 +233,8 @@ pub fn select_bins_by_energy(
     // Scaled: without this, the power sums underflow to 0 for very quiet data (SilentData)
     // and overflow to infinity for very loud data (every bin selected).
     let mut power = vec![0.0; nfft / 2 + 1];
-    let mut planner = FftPlanner::new();
     for row in scaled_rows(data, max_abs) {
-        for (p, bin) in power
-            .iter_mut()
-            .zip(stft_with(&row, nfft, 0, &mut planner)?)
-        {
+        for (p, bin) in power.iter_mut().zip(stft(&row, nfft, 0)?) {
             *p += bin.iter().map(|c| c.norm_sqr()).sum::<f64>() / bin.len() as f64;
         }
     }
@@ -899,11 +894,10 @@ impl MusicEstimator {
             return Err(MusicError::NoUsableBins);
         }
 
-        // STFT per microphone channel, all sharing one FFT plan
-        let mut planner = FftPlanner::new();
+        // STFT per microphone channel (they share the cached FFT plan)
         let stfts: Vec<Vec<Vec<Cplx>>> = scaled_rows(data, max_abs)
             .iter()
-            .map(|row| stft_with(row, nfft, 0, &mut planner))
+            .map(|row| stft(row, nfft, 0))
             .collect::<Result<_>>()?;
         let n_windows = stfts[0][0].len();
 
