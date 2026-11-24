@@ -924,11 +924,19 @@ impl MusicEstimator {
             // Cross-spectral matrix of this bin, averaged over time windows. Built one bin
             // at a time so that only one n_mics x n_mics matrix is alive at once.
             let bin_slices: Vec<&[Cplx]> = stfts.iter().map(|s| s[bin].as_slice()).collect();
+            // Each entry is summed over the windows in order, as the sum of the windows'
+            // outer products would, without allocating a vector and a matrix per window.
             let mut cov = CMatrix::zeros(n_mics, n_mics);
-            for col in
-                (0..n_windows).map(|w| CVec::from_iterator(n_mics, bin_slices.iter().map(|s| s[w])))
-            {
-                cov += &col * col.adjoint();
+            for i in 0..n_mics {
+                for j in 0..=i {
+                    let sum: Cplx = bin_slices[i]
+                        .iter()
+                        .zip(bin_slices[j])
+                        .map(|(a, b)| a * b.conj())
+                        .sum();
+                    cov[(i, j)] = sum;
+                    cov[(j, i)] = sum.conj();
+                }
             }
             let cov = cov.scale(1.0 / n_windows as f64);
             if cov.trace().re <= SILENCE_RATIO * strongest {
