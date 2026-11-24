@@ -8,7 +8,7 @@ use num_complex::Complex;
 use rustfft::FftPlanner;
 
 use crate::error::{MusicError, Result};
-use crate::stft::{analytic_signal_with, stft_with};
+use crate::stft::{real_fft_plan, stft_with};
 
 /// Speed of sound in air at ~20 °C, in metres per second.
 const SPEED_OF_SOUND: f64 = 343.2;
@@ -290,15 +290,69 @@ fn accurate_mean<'a>(values: impl ExactSizeIterator<Item = &'a f64>) -> f64 {
     (sum + compensation) / n
 }
 
-/// Checks that real data has samples and that all of them are finite.
-fn check_real_samples(data: &DMatrix<f64>) -> Result<()> {
+/// Covariance `(1/N) Σₜ z(t) z(t)ᴴ` of the analytic signals `z` of `rows` (one real
+/// signal of length N per row), as [`analytic_signal`](crate::analytic_signal) would give
+/// them, computed from the real FFT of each row without forming `z`.
+///
+/// `z` is the inverse DFT of `H·X`, where `X` is the row's DFT and `H` the one-sided
+/// window (1 at DC, 2 for the positive frequencies, 1 at the Nyquist bin of even N, 0 for
+/// the negative frequencies). By Parseval, `Σₜ zᵢ(t) zⱼ(t)* = (1/N) Σₖ |Hₖ|² Xᵢ(k) Xⱼ(k)*`,
+/// so only the bins `0..=N/2` of a real FFT are needed: no complex FFT, no inverse FFT, and
+/// no N-sample complex matrix. `rows` is used as FFT scratch space and left unspecified.
+fn analytic_covariance(rows: &mut [Vec<f64>]) -> CMatrix {
+    let n = rows[0].len();
+    let plan = real_fft_plan(n);
+    let mut scratch = plan.make_scratch_vec();
+    let spectra: Vec<Vec<Cplx>> = rows
+        .iter_mut()
+        .map(|row| {
+            let mut spectrum = plan.make_output_vec();
+            plan.process_with_scratch(row, &mut spectrum, &mut scratch)
+                .expect("buffer lengths come from the plan");
+            spectrum
+        })
+        .collect();
+
+    // |H|² is 4 for the positive frequencies 1 ≤ k < N/2 (k ≤ (N-1)/2 for odd N) and 1 for
+    // DC and, for even N, the Nyquist bin N/2.
+    let positive_end = n.div_ceil(2);
+    let nyquist = n.is_multiple_of(2).then_some(n / 2);
+    let norm = 1.0 / (n as f64 * n as f64);
+    let m = rows.len();
+    let mut cov = CMatrix::zeros(m, m);
+    for i in 0..m {
+        for j in 0..=i {
+            let (a, b) = (&spectra[i], &spectra[j]);
+            let positive: Cplx = a[1..positive_end]
+                .iter()
+                .zip(&b[1..positive_end])
+                .map(|(x, y)| x * y.conj())
+                .sum();
+            let mut sum = a[0] * b[0].conj() + positive * 4.0;
+            if let Some(k) = nyquist {
+                sum += a[k] * b[k].conj();
+            }
+            cov[(i, j)] = sum * norm;
+            cov[(j, i)] = (sum * norm).conj();
+        }
+    }
+    cov
+}
+
+/// Checks that real data has samples and that all of them are finite, and returns the
+/// largest magnitude (in the same pass, for callers that scale the data).
+fn check_real_samples(data: &DMatrix<f64>) -> Result<f64> {
     if data.is_empty() {
         return Err(MusicError::EmptyData);
     }
-    if !data.iter().all(|x| x.is_finite()) {
-        return Err(MusicError::NonFiniteData);
+    let mut max_abs = 0.0_f64;
+    for x in data.iter() {
+        if !x.is_finite() {
+            return Err(MusicError::NonFiniteData);
+        }
+        max_abs = max_abs.max(x.abs());
     }
-    Ok(())
+    Ok(max_abs)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -486,6 +540,14 @@ impl MusicEstimator {
     /// }
     /// ```
     pub fn steering_vector(&self, angle: f64, frequency: f64) -> CVec {
+        let mut out = vec![Cplx::new(0.0, 0.0); self.n_antennas()];
+        self.steering_vector_into(angle, frequency, &mut out);
+        CVec::from_vec(out)
+    }
+
+    /// [`steering_vector`](Self::steering_vector) written into `out` (one element per
+    /// antenna), so that the spectrum does not allocate a vector per angle.
+    fn steering_vector_into(&self, angle: f64, frequency: f64, out: &mut [Cplx]) {
         let dir = [angle.cos(), angle.sin()];
         // For f < Nyquist (sr/2): analytic signal has positive phase → use +exponent.
         // For f > Nyquist: signal aliases in the one-sided FFT; dominant eigenvector
@@ -499,19 +561,16 @@ impl MusicEstimator {
             1.0_f64
         };
         let at_nyquist = (frequency - nyquist).abs() < 0.5;
-        CVec::from_iterator(
-            self.n_antennas(),
-            self.antenna_positions.iter().map(|p| {
-                let delay = (p[0] * dir[0] + p[1] * dir[1]) / SPEED_OF_SOUND;
-                let phase = phase_sign * 2.0 * PI * frequency * delay;
-                if at_nyquist {
-                    // Real steering vector: imaginary part is zero
-                    Cplx::new(phase.cos(), 0.0)
-                } else {
-                    Cplx::from_polar(1.0, phase)
-                }
-            }),
-        )
+        for (element, p) in out.iter_mut().zip(&self.antenna_positions) {
+            let delay = (p[0] * dir[0] + p[1] * dir[1]) / SPEED_OF_SOUND;
+            let phase = phase_sign * 2.0 * PI * frequency * delay;
+            *element = if at_nyquist {
+                // Real steering vector: imaginary part is zero
+                Cplx::new(phase.cos(), 0.0)
+            } else {
+                Cplx::from_polar(1.0, phase)
+            };
+        }
     }
 
     /// Extracts the noise subspace from the Hermitian covariance matrix `cov`.
@@ -575,12 +634,22 @@ impl MusicEstimator {
         self.check_array()?;
         Self::check_frequency(frequency)?;
         let angles = self.angle_grid()?;
+        let mut a = vec![Cplx::new(0.0, 0.0); self.n_antennas()];
         let scores: Vec<f64> = angles
             .iter()
             .map(|&theta| {
-                let a = self.steering_vector(theta, frequency);
-                let en_a = noise_mat.adjoint() * &a; // (n_noise × 1)
-                let denom = en_a.norm_squared();
+                self.steering_vector_into(theta, frequency, &mut a);
+                // ‖Eₙᴴ a‖²: one inner product per noise eigenvector (column of noise_mat)
+                let denom: f64 = noise_mat
+                    .column_iter()
+                    .map(|e| {
+                        e.iter()
+                            .zip(&a)
+                            .map(|(e, a)| e.conj() * a)
+                            .sum::<Cplx>()
+                            .norm_sqr()
+                    })
+                    .sum();
                 if denom == 0.0 {
                     f64::INFINITY
                 } else {
@@ -639,10 +708,20 @@ impl MusicEstimator {
         let data = data.map(|c| c / scale);
         let n_samples = data.ncols() as f64;
         let cov = (&data * data.adjoint()).scale(1.0 / n_samples);
+        self.doa_from_covariance(&cov, n_sources, frequency)
+    }
+
+    /// The DOA estimates of `estimate_doa` from the covariance `cov` of the array data.
+    fn doa_from_covariance(
+        &self,
+        cov: &CMatrix,
+        n_sources: usize,
+        frequency: f64,
+    ) -> Result<Vec<f64>> {
         if cov.trace().re == 0.0 {
             return Err(MusicError::SilentData);
         }
-        let noise_mat = self.noise_subspace(&cov, n_sources)?;
+        let noise_mat = self.noise_subspace(cov, n_sources)?;
         let (scores, angles) = self.spectrum(&noise_mat, frequency)?;
         Ok(find_peaks(
             &scores,
@@ -654,9 +733,16 @@ impl MusicEstimator {
 
     /// Estimates DOAs from real-valued microphone data, like pyMUSIC's `getSourceAngles`.
     ///
-    /// Removes each channel's mean, converts each channel to its analytic signal with
-    /// [`analytic_signal`] and then calls [`estimate_doa`](Self::estimate_doa). Without
-    /// the mean removal a DC offset acts as a second source at broadside.
+    /// Removes each channel's mean and estimates the DOAs from the covariance of the
+    /// channels' analytic signals (as [`analytic_signal`] gives them), with the same
+    /// eigendecomposition, spectrum and peak search as [`estimate_doa`](Self::estimate_doa).
+    /// Without the mean removal a DC offset acts as a second source at broadside.
+    ///
+    /// The analytic signals are never formed, and `estimate_doa` is not called: the
+    /// covariance is computed directly from the real FFT of each channel (by Parseval's
+    /// theorem), which gives the same covariance up to rounding at a fraction of the cost.
+    /// The data is scaled by a power of two before that, which is exact, so the covariance
+    /// is not rescaled again as `estimate_doa` does with complex data.
     ///
     /// # Arguments
     /// * `data`      – Real array data (n_antennas × n_samples).
@@ -698,27 +784,30 @@ impl MusicEstimator {
         self.check_sources(n_sources)?;
         self.check_array()?;
         Self::check_frequency(frequency)?;
-        check_real_samples(data)?;
-        let data = &normalised_real(data);
-        let mut complex = CMatrix::zeros(data.nrows(), data.ncols());
+        let max_abs = check_real_samples(data)?;
+        // One contiguous row per channel (`data` is column-major), scaled as
+        // [`normalised_real`] does
+        let scale = power_of_two_scale(max_abs);
+        let mut rows = vec![vec![0.0; data.ncols()]; data.nrows()];
+        for (t, column) in data.column_iter().enumerate() {
+            for (row, x) in rows.iter_mut().zip(column.iter()) {
+                row[t] = x / scale;
+            }
+        }
         let (mut raw_energy, mut centred_energy) = (0.0, 0.0);
-        let mut planner = FftPlanner::new();
-        for m in 0..data.nrows() {
-            let mean = accurate_mean(data.row(m).iter());
-            let row: Vec<f64> = data.row(m).iter().map(|x| x - mean).collect();
-            raw_energy += data.row(m).norm_squared();
-            centred_energy += row.iter().map(|x| x * x).sum::<f64>();
-            for (t, c) in analytic_signal_with(&row, &mut planner)
-                .into_iter()
-                .enumerate()
-            {
-                complex[(m, t)] = c;
+        for row in &mut rows {
+            let mean = accurate_mean(row.iter());
+            for x in row.iter_mut() {
+                raw_energy += *x * *x;
+                *x -= mean;
+                centred_energy += *x * *x;
             }
         }
         if centred_energy <= SILENCE_RATIO * raw_energy {
             return Err(MusicError::SilentData);
         }
-        self.estimate_doa(&complex, n_sources, frequency)
+        let cov = analytic_covariance(&mut rows);
+        self.doa_from_covariance(&cov, n_sources, frequency)
     }
 
     /// Integrated Frequency-Band (IFB) MUSIC spectrum.
@@ -877,6 +966,44 @@ mod tests {
 
     fn default_est() -> MusicEstimator {
         MusicEstimator::default()
+    }
+
+    // ── analytic_covariance ───────────────────────────────────────────────────
+
+    /// The Parseval covariance must equal `(1/N) Z Zᴴ` of the analytic signals from
+    /// `analytic_signal`, for odd and even lengths (the DC, positive-frequency and Nyquist
+    /// weights differ between them) down to N = 1. The golden and snapshot spectrum tests do
+    /// not run this path, and the DOA-level tests only catch errors that move the peak.
+    #[test]
+    fn analytic_covariance_matches_analytic_signal() {
+        let mut state = 0x2545_f491_4f6c_dd1d_u64;
+        let mut next = || {
+            state = state
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            2.0 * (state >> 11) as f64 / (1u64 << 53) as f64 - 1.0
+        };
+        for n in 1..=40 {
+            let rows: Vec<Vec<f64>> = (0..4).map(|_| (0..n).map(|_| next()).collect()).collect();
+            let z: Vec<Vec<Cplx>> = rows.iter().map(|r| crate::analytic_signal(r)).collect();
+            let expected = CMatrix::from_fn(4, 4, |i, j| {
+                z[i].iter()
+                    .zip(&z[j])
+                    .map(|(a, b)| a * b.conj())
+                    .sum::<Cplx>()
+                    / n as f64
+            });
+            let actual = analytic_covariance(&mut rows.clone());
+            let scale = expected.iter().map(|c| c.norm()).fold(0.0, f64::max);
+            let worst = (&actual - &expected)
+                .iter()
+                .map(|c| c.norm())
+                .fold(0.0, f64::max);
+            assert!(
+                worst <= 1e-12 * scale,
+                "N = {n}: worst difference {worst:e}, largest entry {scale:e}"
+            );
+        }
     }
 
     // ── hermitian_eigen ───────────────────────────────────────────────────────
