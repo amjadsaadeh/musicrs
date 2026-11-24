@@ -344,6 +344,25 @@ fn analytic_covariance(rows: &mut [Vec<f64>]) -> CMatrix {
     cov
 }
 
+/// Cross-spectral matrix `(1/W) Σ_w x(w) x(w)ᴴ` of one STFT bin, where `bins[i][w]` is the
+/// bin's value in window `w` of microphone `i` (all of length W ≥ 1).
+///
+/// Each entry is summed over the windows in order, as the sum of the windows' outer
+/// products would, without allocating a vector and a matrix per window; the upper
+/// triangle is the conjugate of the lower.
+fn cross_spectral_matrix(bins: &[&[Cplx]]) -> CMatrix {
+    let n = bins.len();
+    let mut cov = CMatrix::zeros(n, n);
+    for i in 0..n {
+        for j in 0..=i {
+            let sum: Cplx = bins[i].iter().zip(bins[j]).map(|(a, b)| a * b.conj()).sum();
+            cov[(i, j)] = sum;
+            cov[(j, i)] = sum.conj();
+        }
+    }
+    cov.scale(1.0 / bins[0].len() as f64)
+}
+
 /// Checks that real data has samples and that all of them are finite, and returns the
 /// largest magnitude (in the same pass, for callers that scale the data).
 fn check_real_samples(data: &DMatrix<f64>) -> Result<f64> {
@@ -876,7 +895,6 @@ impl MusicEstimator {
                 samples: data.ncols(),
             });
         }
-        let n_mics = data.nrows();
         let freq_bins = nfft / 2 + 1;
 
         let default_bins: Vec<usize> = (1..freq_bins).collect();
@@ -924,21 +942,7 @@ impl MusicEstimator {
             // Cross-spectral matrix of this bin, averaged over time windows. Built one bin
             // at a time so that only one n_mics x n_mics matrix is alive at once.
             let bin_slices: Vec<&[Cplx]> = stfts.iter().map(|s| s[bin].as_slice()).collect();
-            // Each entry is summed over the windows in order, as the sum of the windows'
-            // outer products would, without allocating a vector and a matrix per window.
-            let mut cov = CMatrix::zeros(n_mics, n_mics);
-            for i in 0..n_mics {
-                for j in 0..=i {
-                    let sum: Cplx = bin_slices[i]
-                        .iter()
-                        .zip(bin_slices[j])
-                        .map(|(a, b)| a * b.conj())
-                        .sum();
-                    cov[(i, j)] = sum;
-                    cov[(j, i)] = sum.conj();
-                }
-            }
-            let cov = cov.scale(1.0 / n_windows as f64);
+            let cov = cross_spectral_matrix(&bin_slices);
             if cov.trace().re <= SILENCE_RATIO * strongest {
                 // No power in this bin: its noise subspace would be arbitrary.
                 continue;
@@ -1028,6 +1032,38 @@ mod tests {
                 let expected: Vec<f64> = data.row(i).iter().map(|x| x / divisor).collect();
                 assert_eq!(row, &expected, "scale {scale}, row {i}");
             }
+        }
+    }
+
+    // ── cross_spectral_matrix ─────────────────────────────────────────────────
+
+    /// Equal to the average of the windows' outer products `x xᴴ`, bit for bit: a swapped
+    /// index or a missing conjugate would show up at once.
+    #[test]
+    fn cross_spectral_matrix_matches_outer_products() {
+        for (n_mics, n_windows) in [(1, 1), (2, 3), (4, 100), (5, 17)] {
+            let bins: Vec<Vec<Cplx>> = (0..n_mics)
+                .map(|i| {
+                    (0..n_windows)
+                        .map(|w| {
+                            let t = (i * 131 + w * 17 + 3) as f64;
+                            Cplx::new((t * 0.77).sin() * 3.0, (t * 1.3).cos() - 0.25)
+                        })
+                        .collect()
+                })
+                .collect();
+            let slices: Vec<&[Cplx]> = bins.iter().map(Vec::as_slice).collect();
+            let mut expected = CMatrix::zeros(n_mics, n_mics);
+            for w in 0..n_windows {
+                let col = CVec::from_iterator(n_mics, bins.iter().map(|b| b[w]));
+                expected += &col * col.adjoint();
+            }
+            let expected = expected.scale(1.0 / n_windows as f64);
+            assert_eq!(
+                cross_spectral_matrix(&slices),
+                expected,
+                "{n_mics} mics, {n_windows} windows"
+            );
         }
     }
 
