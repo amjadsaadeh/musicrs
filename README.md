@@ -79,19 +79,24 @@ needs one spectrum per bin. Written idiomatically, the same algorithm in numpy t
 milliseconds.
 
 **Against vectorized numpy, musicrs is 2.6× to 3.5× faster on narrowband DOA and 6.3× faster
-on IFB-MUSIC over 80 bins, and level on single-bin IFB-MUSIC (1.16× on the 1 s recording,
+on IFB-MUSIC over 80 bins (about 1.5× for equal work, see below), and level on single-bin IFB-MUSIC (1.16× on the 1 s recording,
 1.00× on the 2 s one).**
 
 - *Narrowband* never forms the analytic signals. Their covariance is computed directly from
   each channel's real FFT (Parseval's theorem), so there is no inverse FFT and no complex
   N-sample matrix, and the FFT plans are reused between calls. numpy does a complex FFT and an
   inverse FFT per channel and then a matrix product over all samples.
-- *IFB-MUSIC over 80 bins* is dominated by the per-bin work of 80 eigendecompositions and 80
-  spectra. numpy pays Python and call overhead for each bin.
+- *IFB-MUSIC over 80 bins* does not compare equal work. The recording is exactly periodic, so
+  only 20 of the 80 bins carry energy. musicrs skips the 60 silent bins; numpy and pyMUSIC
+  process all 80. On the same 20 bins musicrs is about 1.5× faster than numpy: numpy pays
+  Python overhead and a general eigensolver for every bin.
 - *Single-bin IFB-MUSIC* is mostly preprocessing, not MUSIC: checking and scaling the samples
   and the STFT of every bin. The silence check compares the requested bin with the strongest
   bin of the whole spectrum, so all bins are computed. With one vectorizable input pass and a
   real FFT (#35), musicrs does this about as fast as numpy's single batched `rfft`.
+
+[`docs/performance.md`](docs/performance.md) lists the techniques behind these numbers, the
+time each stage takes in both implementations, and what could still be made faster.
 
 | Workload | Implementation | n | Mean ± stddev | Median | p5 – p95 | CV | musicrs speedup (mean) |
 |---|---|---:|---:|---:|---:|---:|---:|
