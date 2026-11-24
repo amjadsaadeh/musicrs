@@ -1,0 +1,47 @@
+{
+  "cli_version": "0.13.4",
+  "checkpoint_id": "01M86WA522V8C4Q829WDDSJ421",
+  "session_id": "46911313-2cca-4da2-9c13-85365306ce52",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-24T13:35:51.791591267Z",
+  "branch": "fix/ifb-preprocessing",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "src/music.rs"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-opus-5-5",
+  "turn_id": "349c7499995d",
+  "compact_transcript_start": 0,
+  "token_usage": {
+    "input_tokens": 34,
+    "cache_creation_tokens": 74840,
+    "cache_read_tokens": 1129485,
+    "output_tokens": 18409,
+    "api_call_count": 16
+  },
+  "session_token_usage": {
+    "input_tokens": 40,
+    "cache_creation_tokens": 82578,
+    "cache_read_tokens": 1162316,
+    "output_tokens": 18606,
+    "api_call_count": 18
+  },
+  "redaction": {
+    "replacements": 2,
+    "layers": {
+      "betterleaks": 0,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 2,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "session_metrics": {
+    "turn_count": 1
+  }
+}

@@ -1,0 +1,5 @@
+So tell me, why is the vectorized IFB MUSIC implementation in python still faster?
+
+---
+
+yes,do thourough testing with the estisting tests
