@@ -1,0 +1,37 @@
+yes push and open the PR and delete the other worktrees
+
+---
+
+yes delete the build dirs too
+
+---
+
+yes delete the leftovers too
+
+---
+
+check the CI status of the PRs
+
+---
+
+uodate already done
+
+---
+
+yes remove it
+
+---
+
+fix the snapshot tolerance at the peaks
+
+---
+
+create a pr
+
+---
+
+check the CI status of the PR
+
+---
+
+merge it
