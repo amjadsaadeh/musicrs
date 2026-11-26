@@ -161,7 +161,9 @@ fn find_peaks(scores: &[f64], angles: &[f64], n: usize, circular: bool) -> Vec<f
         })
         .collect();
 
-    peaks.sort_unstable_by(|a, b| b.0.total_cmp(&a.0));
+    // Highest first; peaks of equal height (a line array's mirror images) by angle, so
+    // that the order does not depend on the sort algorithm.
+    peaks.sort_by(|a, b| b.0.total_cmp(&a.0).then(a.1.total_cmp(&b.1)));
     peaks.into_iter().take(n).map(|(_, a)| a).collect()
 }
 
@@ -1671,6 +1673,21 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn find_peaks_equal_heights_ordered_by_angle() {
+        let angles: Vec<f64> = (0..8).map(|i| i as f64).collect();
+        let scores = [0.0, 1.0, 0.0, 3.0, 0.0, 3.0, 0.0, 3.0];
+        assert_eq!(
+            find_peaks(&scores, &angles, 4, false),
+            vec![3.0, 5.0, 7.0, 1.0]
+        );
+        // On the circle the run at the end is a peak too (its neighbour 0 is lower)
+        assert_eq!(
+            find_peaks(&scores, &angles, 4, true),
+            vec![3.0, 5.0, 7.0, 1.0]
+        );
     }
 
     #[test]
