@@ -13,7 +13,8 @@ mod common;
 use std::f64::consts::{FRAC_PI_2, PI};
 
 use common::{great_circle_deg, plane_wave_real, plane_waves_complex};
-use musicrs::{Direction, MusicEstimator, MusicEstimator3d};
+use musicrs::{Direction, MusicEstimator, MusicEstimator3d, select_bins_by_energy};
+use nalgebra::DMatrix;
 
 const SAMPLE_RATE: f64 = 16000.0;
 
@@ -180,7 +181,7 @@ fn check_matches_2d(files: &[std::path::PathBuf]) {
         let rows: Vec<Vec<num_complex::Complex<f64>>> = (0..4)
             .map(|m| musicrs::analytic_signal(&data.row(m).iter().copied().collect::<Vec<f64>>()))
             .collect();
-        let analytic = nalgebra::DMatrix::from_fn(4, data.ncols(), |m, t| rows[m][t]);
+        let analytic = DMatrix::from_fn(4, data.ncols(), |m, t| rows[m][t]);
         let cov = &analytic * analytic.adjoint();
         let noise = est_2d.noise_subspace(&cov, 1).unwrap();
         let (spec_2d, angles_2d) = est_2d.spectrum(&noise, freq).unwrap();
@@ -354,4 +355,123 @@ fn extreme_amplitudes() {
             .unwrap();
         assert_directions(&found, &[source], 1.0);
     }
+}
+
+// ─── IFB-MUSIC (wideband) ────────────────────────────────────────────────────
+
+/// Sum of real tones at `freqs`, all from `source` (far field), each with its own phase.
+fn multi_tone(positions: &[[f64; 3]], source: (f64, f64), freqs: &[f64], n: usize) -> DMatrix<f64> {
+    freqs
+        .iter()
+        .enumerate()
+        .map(|(k, &f)| {
+            plane_wave_real(positions, source, f, SAMPLE_RATE, n)
+                .map(|x| x * (1.0 + 0.3 * k as f64))
+        })
+        .fold(DMatrix::zeros(positions.len(), n), |acc, x| acc + x)
+}
+
+/// IFB-MUSIC on the bin of a single tone (nfft 160: 100 Hz bins, 1000 Hz is bin 10).
+#[test]
+fn ifb_single_tone_on_its_bin() {
+    let est = MusicEstimator3d::new(tetrahedron(), SAMPLE_RATE);
+    let mut log = common::ErrorLog::new("IFB 3-D single tone");
+    for source in [(70.0, -35.0), (300.0, 10.0), (0.2, 75.0)] {
+        let data = plane_wave_real(&tetrahedron(), source, 1000.0, SAMPLE_RATE, 4000);
+        let spectrum = est.ifb_music_spectrum(&data, 160, 1, Some(&[10])).unwrap();
+        assert_eq!(spectrum.values.shape(), (180, 360));
+        let found = est.find_peaks(&spectrum, 1);
+        assert_eq!(found.len(), 1);
+        log.record(
+            format!("{source:?}"),
+            great_circle_deg(degrees(&found[0]), source),
+        );
+    }
+    log.check(1.0);
+}
+
+/// A multi-tone source, with the bins picked by energy: all spectrum values are finite and
+/// positive, and the highest peak is the source.
+#[test]
+fn ifb_broadband_energy_selected_bins() {
+    let est = MusicEstimator3d::new(tetrahedron(), SAMPLE_RATE);
+    let source = (210.0, 50.0);
+    let data = multi_tone(&tetrahedron(), source, &[600.0, 1100.0, 1700.0], 8000);
+    let bins = select_bins_by_energy(&data, 160, 20.0).unwrap();
+    assert_eq!(bins, [6, 11, 17]);
+    let spectrum = est.ifb_music_spectrum(&data, 160, 1, Some(&bins)).unwrap();
+    assert!(spectrum.values.iter().all(|v| v.is_finite() && *v > 0.0));
+    assert_directions(&est.find_peaks(&spectrum, 1), &[source], 1.0);
+}
+
+/// Two sources at different frequencies and directions, one bin each: both are among the
+/// four highest peaks of the merged spectrum (as in the 2-D broadband test).
+#[test]
+fn ifb_two_sources_at_different_frequencies() {
+    let est = MusicEstimator3d::new(octahedron(), SAMPLE_RATE);
+    let (a, b) = ((40.0, 20.0), (230.0, -50.0));
+    let data = plane_wave_real(&octahedron(), a, 800.0, SAMPLE_RATE, 8000)
+        + plane_wave_real(&octahedron(), b, 1500.0, SAMPLE_RATE, 8000);
+    let spectrum = est
+        .ifb_music_spectrum(&data, 160, 1, Some(&[8, 15]))
+        .unwrap();
+    let found: Vec<(f64, f64)> = est.find_peaks(&spectrum, 4).iter().map(degrees).collect();
+    for truth in [a, b] {
+        let error = found
+            .iter()
+            .map(|&f| great_circle_deg(f, truth))
+            .fold(f64::INFINITY, f64::min);
+        assert!(
+            error <= 1.5,
+            "{truth:?} not among {found:?} (error {error:.2}°)"
+        );
+    }
+}
+
+/// On a planar array with one elevation row at 0°, the 3-D IFB spectrum is the 2-D one, bit
+/// for bit, with chosen bins and with all bins.
+#[test]
+fn ifb_matches_2d_estimator_on_recording() {
+    let est_2d = MusicEstimator::default();
+    let half = 0.25_f64.to_radians();
+    let est_3d = MusicEstimator3d {
+        antenna_positions: est_2d
+            .antenna_positions
+            .iter()
+            .map(|p| [p[0], p[1], 0.0])
+            .collect(),
+        azimuth_steps: est_2d.angle_steps_num,
+        azimuth_interval: est_2d.search_interval,
+        elevation_steps: 1,
+        elevation_interval: (-half, half),
+        sample_rate: est_2d.sample_rate,
+    };
+    let (_, data) = common::read_wav_4ch(&common::wav_path(1400, 40, "1.0s"));
+    for bins in [Some(&[14][..]), Some(&[13, 14, 15][..]), None] {
+        let (spec_2d, angles_2d) = est_2d.ifb_music_spectrum(&data, 160, 1, bins).unwrap();
+        let spec_3d = est_3d.ifb_music_spectrum(&data, 160, 1, bins).unwrap();
+        assert_eq!(spec_3d.azimuths, angles_2d);
+        assert_eq!(spec_3d.elevations, vec![0.0]);
+        assert_eq!(
+            spec_3d.values.row(0).iter().copied().collect::<Vec<f64>>(),
+            spec_2d,
+            "bins {bins:?}"
+        );
+    }
+}
+
+/// `find_peaks` on a narrowband spectrum gives what `estimate_doa` gives.
+#[test]
+fn find_peaks_matches_estimate_doa() {
+    let est = MusicEstimator3d::new(octahedron(), SAMPLE_RATE);
+    let sources = [(80.0, 0.0), (200.0, 45.0)];
+    let data = plane_waves_complex(&octahedron(), &sources, 1200.0, SAMPLE_RATE, 6000, 0.05, 7);
+    let cov = &data * data.adjoint();
+    let spectrum = est
+        .spectrum(&est.noise_subspace(&cov, 2).unwrap(), 1200.0)
+        .unwrap();
+    assert_eq!(
+        est.find_peaks(&spectrum, 2),
+        est.estimate_doa(&data, 2, 1200.0).unwrap()
+    );
 }

@@ -749,3 +749,53 @@ fn estimator_3d_steering_vector() {
     assert_eq!(sv.len(), 4);
     assert!(sv.iter().all(|c| (c.norm() - 1.0).abs() < 1e-12));
 }
+
+#[test]
+fn estimator_3d_ifb_errors() {
+    let est = tetrahedron();
+    let ifb = |data: &DMatrix<f64>, nfft, n_sources, bins: Option<&[usize]>| {
+        est.ifb_music_spectrum(data, nfft, n_sources, bins)
+            .map(|_| ())
+    };
+    assert_eq!(
+        ifb(&DMatrix::zeros(3, 1000), NFFT, 1, None),
+        Err(MusicError::RowCountMismatch {
+            expected: 4,
+            got: 3
+        })
+    );
+    assert_eq!(
+        ifb(&DMatrix::zeros(4, 0), NFFT, 1, None),
+        Err(MusicError::EmptyData)
+    );
+    assert_eq!(
+        ifb(&with_nan(tone(1000)), NFFT, 1, None),
+        Err(MusicError::NonFiniteData)
+    );
+    assert_eq!(ifb(&tone(1000), 0, 1, None), Err(MusicError::InvalidNfft));
+    assert_eq!(
+        ifb(&tone(100), NFFT, 1, None),
+        Err(MusicError::DataShorterThanWindow {
+            nfft: NFFT,
+            samples: 100
+        })
+    );
+    assert_eq!(ifb(&tone(1000), NFFT, 4, None), Err(TOO_MANY));
+    assert_eq!(ifb(&tone(1000), NFFT, 0, None), Err(MusicError::NoSources));
+    assert_eq!(
+        ifb(&tone(1000), NFFT, 1, Some(&[0, 81, 500])),
+        Err(MusicError::NoUsableBins)
+    );
+    assert_eq!(
+        ifb(&DMatrix::zeros(4, 1000), NFFT, 1, None),
+        Err(MusicError::SilentData)
+    );
+    let bad_grid = MusicEstimator3d {
+        elevation_interval: (0.0, PI),
+        ..tetrahedron()
+    };
+    assert!(matches!(
+        bad_grid.ifb_music_spectrum(&tone(1000), NFFT, 1, Some(&[10])),
+        Err(MusicError::InvalidElevationGrid { .. })
+    ));
+}
