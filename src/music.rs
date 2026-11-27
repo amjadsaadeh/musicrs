@@ -785,92 +785,21 @@ impl MusicEstimator {
         self.check_rows(data.nrows())?;
         self.check_sources(n_sources)?;
         self.check_array()?;
-        let max_abs = check_real_samples(data)?;
-        if nfft == 0 {
-            return Err(MusicError::InvalidNfft);
-        }
-        if data.ncols() < nfft {
-            return Err(MusicError::DataShorterThanWindow {
-                nfft,
-                samples: data.ncols(),
-            });
-        }
-        let freq_bins = nfft / 2 + 1;
-
-        let default_bins: Vec<usize> = (1..freq_bins).collect();
-        let mut active_bins: Vec<usize> = bins
-            .unwrap_or(&default_bins)
-            .iter()
-            .copied()
-            .filter(|bin| (1..freq_bins).contains(bin))
-            .collect();
-        // A repeated bin would count more than once in the geometric mean; the order of the
-        // bins does not change the mean.
-        active_bins.sort_unstable();
-        active_bins.dedup();
-        if active_bins.is_empty() {
-            return Err(MusicError::NoUsableBins);
-        }
-
-        // STFT per microphone channel (they share the cached FFT plan)
-        let stfts: Vec<Vec<Vec<Cplx>>> = scaled_rows(data, max_abs)
-            .iter()
-            .map(|row| stft(row, nfft, 0))
-            .collect::<Result<_>>()?;
-        let n_windows = stfts[0][0].len();
-
-        // Geometric mean, accumulated as a sum of logarithms: the product of hundreds of
-        // per-bin spectra overflows f64.
-        let mut log_sum: Option<Vec<f64>> = None;
-        let mut angles_out: Vec<f64> = Vec::new();
-        let mut n_processed = 0usize;
-
-        // Silence is judged against the strongest bin of the whole spectrum, DC included,
-        // so that a requested bin holding only rounding residue is still recognised.
-        let strongest = stfts
-            .iter()
-            .fold(vec![0.0; freq_bins], |mut power, mic| {
-                for (p, bin) in power.iter_mut().zip(mic) {
-                    *p += bin.iter().map(|c| c.norm_sqr()).sum::<f64>() / n_windows as f64;
-                }
-                power
-            })
-            .into_iter()
-            .fold(0.0, f64::max);
-
-        for bin in active_bins {
-            // Cross-spectral matrix of this bin, averaged over time windows. Built one bin
-            // at a time so that only one n_mics x n_mics matrix is alive at once.
-            let bin_slices: Vec<&[Cplx]> = stfts.iter().map(|s| s[bin].as_slice()).collect();
-            let cov = cross_spectral_matrix(&bin_slices);
-            if cov.trace().re <= SILENCE_RATIO * strongest {
-                // No power in this bin: its noise subspace would be arbitrary.
-                continue;
-            }
-            let frequency = bin as f64 * self.sample_rate / nfft as f64;
-            let noise_mat = self.noise_subspace(&cov, n_sources)?;
-            let (spec, angles) = self.spectrum(&noise_mat, frequency)?;
-
-            match &mut log_sum {
-                None => {
-                    log_sum = Some(spec.iter().map(|s| s.ln()).collect());
-                    angles_out = angles;
-                }
-                Some(sum) => {
-                    for (acc, s) in sum.iter_mut().zip(spec.iter()) {
-                        *acc += s.ln();
-                    }
-                }
-            }
-            n_processed += 1;
-        }
-
-        let sum = log_sum.ok_or(MusicError::SilentData)?;
-        let merged: Vec<f64> = sum
-            .iter()
-            .map(|&v| (v / n_processed as f64).exp())
-            .collect();
-        Ok((merged, angles_out))
+        let mut angles = Vec::new();
+        let merged = ifb_geometric_mean(
+            data,
+            nfft,
+            n_sources,
+            bins,
+            self.sample_rate,
+            self.n_antennas(),
+            |noise_mat, frequency| {
+                let (spec, grid) = self.spectrum(noise_mat, frequency)?;
+                angles = grid;
+                Ok(spec)
+            },
+        )?;
+        Ok((merged, angles))
     }
 }
 
@@ -939,6 +868,106 @@ pub(crate) fn noise_subspace(n: usize, cov: &CMatrix, n_sources: usize) -> Resul
     let (_eigenvalues, eigenvectors) = hermitian_eigen(cov);
     let n_noise = cov.nrows() - n_sources;
     Ok(eigenvectors.columns(0, n_noise).into())
+}
+
+/// The IFB-MUSIC preprocessing and merge shared by the 2-D and 3-D estimators (see
+/// [`MusicEstimator::ifb_music_spectrum`]): checks the data, takes each channel's STFT,
+/// and for every usable bin with power passes its noise subspace and frequency to
+/// `spectrum`, whose scores (one per grid direction, the same grid every time) are merged by
+/// geometric mean. The caller checks the rows, `n_sources` and the array first.
+pub(crate) fn ifb_geometric_mean(
+    data: &DMatrix<f64>,
+    nfft: usize,
+    n_sources: usize,
+    bins: Option<&[usize]>,
+    sample_rate: f64,
+    n_antennas: usize,
+    mut spectrum: impl FnMut(&CMatrix, f64) -> Result<Vec<f64>>,
+) -> Result<Vec<f64>> {
+    let max_abs = check_real_samples(data)?;
+    if nfft == 0 {
+        return Err(MusicError::InvalidNfft);
+    }
+    if data.ncols() < nfft {
+        return Err(MusicError::DataShorterThanWindow {
+            nfft,
+            samples: data.ncols(),
+        });
+    }
+    let freq_bins = nfft / 2 + 1;
+
+    let default_bins: Vec<usize> = (1..freq_bins).collect();
+    let mut active_bins: Vec<usize> = bins
+        .unwrap_or(&default_bins)
+        .iter()
+        .copied()
+        .filter(|bin| (1..freq_bins).contains(bin))
+        .collect();
+    // A repeated bin would count more than once in the geometric mean; the order of the
+    // bins does not change the mean.
+    active_bins.sort_unstable();
+    active_bins.dedup();
+    if active_bins.is_empty() {
+        return Err(MusicError::NoUsableBins);
+    }
+
+    // STFT per microphone channel (they share the cached FFT plan)
+    let stfts: Vec<Vec<Vec<Cplx>>> = scaled_rows(data, max_abs)
+        .iter()
+        .map(|row| stft(row, nfft, 0))
+        .collect::<Result<_>>()?;
+    let n_windows = stfts[0][0].len();
+
+    // Geometric mean, accumulated as a sum of logarithms: the product of hundreds of
+    // per-bin spectra overflows f64.
+    let mut log_sum: Option<Vec<f64>> = None;
+    let mut n_processed = 0usize;
+
+    // Silence is judged against the strongest bin of the whole spectrum, DC included,
+    // so that a requested bin holding only rounding residue is still recognised.
+    let strongest = stfts
+        .iter()
+        .fold(vec![0.0; freq_bins], |mut power, mic| {
+            for (p, bin) in power.iter_mut().zip(mic) {
+                *p += bin.iter().map(|c| c.norm_sqr()).sum::<f64>() / n_windows as f64;
+            }
+            power
+        })
+        .into_iter()
+        .fold(0.0, f64::max);
+
+    for bin in active_bins {
+        // Cross-spectral matrix of this bin, averaged over time windows. Built one bin
+        // at a time so that only one n_mics x n_mics matrix is alive at once.
+        let bin_slices: Vec<&[Cplx]> = stfts.iter().map(|s| s[bin].as_slice()).collect();
+        let cov = cross_spectral_matrix(&bin_slices);
+        if cov.trace().re <= SILENCE_RATIO * strongest {
+            // No power in this bin: its noise subspace would be arbitrary.
+            continue;
+        }
+        let frequency = bin as f64 * sample_rate / nfft as f64;
+        let noise_mat = noise_subspace(n_antennas, &cov, n_sources)?;
+        let spec = spectrum(&noise_mat, frequency)?;
+
+        match &mut log_sum {
+            None => {
+                log_sum = Some(spec.iter().map(|s| s.ln()).collect());
+            }
+            Some(sum) => {
+                for (acc, s) in sum.iter_mut().zip(spec.iter()) {
+                    *acc += s.ln();
+                }
+            }
+        }
+        n_processed += 1;
+    }
+
+    let sum = log_sum.ok_or(MusicError::SilentData)?;
+    let merged: Vec<f64> = sum
+        .iter()
+        .map(|&v| (v / n_processed as f64).exp())
+        .collect();
+    Ok(merged)
 }
 
 /// Fails with [`MusicError::SilentData`] if the covariance has no power.
