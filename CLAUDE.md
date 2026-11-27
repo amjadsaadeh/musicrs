@@ -30,10 +30,11 @@ cargo doc --open
 src/
 ├── lib.rs      # Public API exports and crate-level docs
 ├── error.rs    # MusicError (returned by every fallible public function) and `musicrs::error::Result` (not re-exported at the root)
-├── music.rs    # Core MUSIC algorithm (MusicEstimator, spectrum, DOA estimation)
+├── music.rs    # Core MUSIC algorithm (MusicEstimator, spectrum, DOA estimation) and the geometry-independent helpers (checks, steering from delays, score, covariances, noise subspace) that music3d reuses
+├── music3d.rs  # 3-D MUSIC (MusicEstimator3d, Direction, Spectrum3d): azimuth × elevation grid, 2-D peak finder
 └── stft.rs     # Signal processing (STFT, analytic signal via Hilbert transform)
 tests/
-├── common/mod.rs                # Shared WAV/filename/angle helpers, ErrorLog
+├── common/mod.rs                # Shared WAV/filename/angle helpers, ErrorLog, far-field plane-wave generator for 3-D arrays
 ├── integration_test.rs          # Narrowband DOA on every WAV recording (±0.5°)
 ├── ifb_test.rs                  # IFB-MUSIC on the tone's bin (nfft 160), below Nyquist (±0.5°); repeated and reordered bins
 ├── errors_test.rs               # Every MusicError the public API returns
@@ -41,6 +42,7 @@ tests/
 ├── broadband_test.rs            # IFB-MUSIC on composite multi-tone signals; two sources at different angles
 ├── noisy_data_test.rs           # Narrowband and IFB (energy-selected bins) DOA with added white noise
 ├── synthetic_test.rs            # Synthetic plane waves: 2-D arrays, 2–3 sources, coherent sources (not resolved), endfire, edge cases, 48 kHz
+├── music3d_test.rs              # 3-D on synthetic far-field plane waves (tetrahedron, octahedron, planar mirror), azimuth seam / shifted intervals, exact match with 2-D on the recordings
 ├── golden/                      # pyMUSIC reference CSVs, *.musicrs.csv snapshots, generate_golden.py
 └── data/single-source/*.wav     # 4-channel 24-bit 16kHz test recordings
 examples/bench_pymusic.rs        # musicrs side of the runtime benchmark vs pyMUSIC
@@ -57,7 +59,8 @@ docs/benchmark*.svg              # charts shown in the README (light and dark), 
 - `analytic_signal()` — converts real signal to complex via Hilbert transform (FFT-based)
 - `stft()` — Short-Time Fourier Transform with configurable window and overlap
 
-- `MusicError` — bad data (wrong row count or covariance shape, no samples, NaN/inf, silence) and bad parameters (too many or zero sources, angle grid incl. spans over 2π, frequency ≤ 0 or non-finite, sample rate, antenna positions, `nfft`, overlap, threshold, no usable bins) are returned as `Err`; the public API does not panic on them and does not return a quiet wrong answer. The estimator's fields are checked where they are used, not in `new()`, because the fields are public. `noise_subspace` reads only the lower triangle of `cov`; IFB never uses the DC bin
+- `MusicEstimator3d` — 3-D counterpart with `[x, y, z]` positions; returns `Direction { azimuth, elevation }`. Elevation is from the x-y plane, in [−π/2, π/2]; the elevation grid holds cell centres (never the poles). Peak picking connects, towards the poles, points as many azimuth steps apart as span one elevation step. With z = 0 and a one-row elevation grid at 0 it reproduces `MusicEstimator` bit for bit (`matches_2d_estimator_on_recordings`). Narrowband only so far; IFB-MUSIC in 3-D is planned as a separate change
+- `MusicError` — bad data (wrong row count or covariance shape, no samples, NaN/inf, silence) and bad parameters (too many or zero sources, angle grid incl. spans over 2π, elevation grid past the poles, frequency ≤ 0 or non-finite, sample rate, antenna positions, `nfft`, overlap, threshold, no usable bins) are returned as `Err` (the enum is `#[non_exhaustive]`); the public API does not panic on them and does not return a quiet wrong answer. The estimator's fields are checked where they are used, not in `new()`, because the fields are public. `noise_subspace` reads only the lower triangle of `cov`; IFB never uses the DC bin
 
 **Core algorithm flow:**
 1. Compute covariance matrix of complex multichannel input

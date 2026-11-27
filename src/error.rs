@@ -3,7 +3,10 @@
 use std::fmt;
 
 /// Why a musicrs function could not produce a result.
+///
+/// New variants may be added in minor releases, so a `match` on it needs a `_` arm.
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub enum MusicError {
     /// The data (or noise subspace) has the wrong number of rows: one per antenna is
     /// expected.
@@ -43,6 +46,12 @@ pub enum MusicError {
     InvalidAngleGrid {
         angle_steps_num: usize,
         search_interval: (f64, f64),
+    },
+    /// The elevation grid is unusable: `elevation_steps` must be positive and the interval
+    /// finite with `start < end`, within [−π/2, π/2].
+    InvalidElevationGrid {
+        elevation_steps: usize,
+        elevation_interval: (f64, f64),
     },
     /// The signal frequency must be finite and positive: at 0 Hz every direction scores
     /// the same.
@@ -103,6 +112,14 @@ impl fmt::Display for MusicError {
                 f,
                 "invalid angle grid: {angle_steps_num} steps over ({start}, {end}); \
                  need at least one step and a finite interval with start < end spanning at most 2π"
+            ),
+            Self::InvalidElevationGrid {
+                elevation_steps,
+                elevation_interval: (start, end),
+            } => write!(
+                f,
+                "invalid elevation grid: {elevation_steps} steps over ({start}, {end}); \
+                 need at least one step and a finite interval with start < end within [-π/2, π/2]"
             ),
             Self::InvalidFrequency(freq) => {
                 write!(f, "frequency must be finite and positive, got {freq} Hz")

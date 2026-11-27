@@ -15,6 +15,8 @@ for empirical investigations of MUSIC in my master thesis. Pure Rust, no LAPACK.
   `getSourceAngles` clustered all estimates around the first peak; this is fixed here.
 - IFB-MUSIC (wideband): per-bin cross-spectral matrices from an STFT, narrowband spectra
   combined by geometric mean.
+- 3-D narrowband MUSIC (`MusicEstimator3d`): azimuth and elevation for `[x, y, z]` arrays,
+  on a regular azimuth × elevation grid.
 - FFT-based analytic signal (Hilbert transform) and STFT helpers.
 
 ## Usage
@@ -43,10 +45,42 @@ For other arrays use `MusicEstimator::new(antenna_positions, angle_steps_num, se
 sample_rate)` with `[x, y]` positions in metres. If you already have complex (analytic) data,
 call `estimate_doa` directly.
 
+### 3-D: azimuth and elevation
+
+```rust
+use musicrs::MusicEstimator3d;
+
+// Tetrahedral array ([x, y, z] in metres), 1° grid over the whole sphere
+let a = 0.03;
+let estimator = MusicEstimator3d::new(
+    vec![[a, a, a], [a, -a, -a], [-a, a, -a], [-a, -a, a]],
+    16000.0,
+);
+let directions = estimator.estimate_doa_from_real(&data, 1, 1000.0)?;
+println!(
+    "azimuth {:.1}°, elevation {:.1}°",
+    directions[0].azimuth.to_degrees(),
+    directions[0].elevation.to_degrees()
+);
+```
+
+Azimuth is measured in the x-y plane from +x towards +y (as in 2-D), elevation from the x-y
+plane towards +z, in [−90°, 90°]. The grid is set by the public fields `azimuth_steps`,
+`azimuth_interval` (any start, span at most 2π, wrapping when it is exactly 2π),
+`elevation_steps` and `elevation_interval` (within [−π/2, π/2]). The elevation grid holds the
+centres of equal cells, so the poles are never on it. `spectrum` returns the whole
+elevation × azimuth pseudo-spectrum.
+
 ### Things to keep in mind
 
 - A linear array cannot distinguish θ from 360° − θ; restrict `search_interval` to [0, π]
   if you want a single answer.
+- In 3-D, the array's shape decides what can be resolved: a planar array cannot tell a source
+  above its plane from its mirror image below (search `elevation_interval = (0, π/2)`), and a
+  linear array only finds the angle between the source and its axis. A non-planar array
+  (e.g. a tetrahedron) resolves the whole sphere.
+- The 3-D grid has `azimuth_steps × elevation_steps` points (64,800 for the default 1° grid),
+  each costing as much as one 2-D grid angle.
 - IFB-MUSIC only sees frequencies up to Nyquist (`sample_rate / 2`); a tone recorded above
   Nyquist is aliased and its DOA cannot be recovered from the STFT bins.
 - Running IFB-MUSIC over *all* bins on a narrowband signal is dominated by noise-only bins;

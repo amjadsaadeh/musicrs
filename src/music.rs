@@ -10,7 +10,7 @@ use crate::error::{MusicError, Result};
 use crate::stft::{real_fft_plan, stft};
 
 /// Speed of sound in air at ~20 °C, in metres per second.
-const SPEED_OF_SOUND: f64 = 343.2;
+pub(crate) const SPEED_OF_SOUND: f64 = 343.2;
 
 /// Power ratio (−260 dB) below which a signal counts as silent: above the rounding residue
 /// left by removing a constant offset or by FFT leakage from an on-bin tone (about
@@ -95,7 +95,7 @@ fn hermitian_eigen(mat: &CMatrix) -> (Vec<f64>, CMatrix) {
 /// with only one neighbour each, so a spectrum still rising at an end of the range peaks
 /// there. A spectrum that is constant over a grid of two or more points has no peak; a
 /// one-point open grid peaks at its only point.
-fn find_peaks(scores: &[f64], angles: &[f64], n: usize, circular: bool) -> Vec<f64> {
+pub(crate) fn find_peaks(scores: &[f64], angles: &[f64], n: usize, circular: bool) -> Vec<f64> {
     let len = scores.len();
     if len == 0 || n == 0 {
         return Vec::new();
@@ -161,7 +161,9 @@ fn find_peaks(scores: &[f64], angles: &[f64], n: usize, circular: bool) -> Vec<f
         })
         .collect();
 
-    peaks.sort_unstable_by(|a, b| b.0.total_cmp(&a.0));
+    // Highest first; peaks of equal height (a line array's mirror images) by angle, so
+    // that the order does not depend on the sort algorithm.
+    peaks.sort_by(|a, b| b.0.total_cmp(&a.0).then(a.1.total_cmp(&b.1)));
     peaks.into_iter().take(n).map(|(_, a)| a).collect()
 }
 
@@ -504,9 +506,7 @@ impl MusicEstimator {
     /// Checks the fields the steering vectors are built from: a finite, positive
     /// `sample_rate` and finite antenna positions.
     fn check_array(&self) -> Result<()> {
-        if !(self.sample_rate.is_finite() && self.sample_rate > 0.0) {
-            return Err(MusicError::InvalidSampleRate(self.sample_rate));
-        }
+        check_sample_rate(self.sample_rate)?;
         match self
             .antenna_positions
             .iter()
@@ -518,38 +518,15 @@ impl MusicEstimator {
     }
 
     fn check_rows(&self, got: usize) -> Result<()> {
-        if got == self.n_antennas() {
-            Ok(())
-        } else {
-            Err(MusicError::RowCountMismatch {
-                expected: self.n_antennas(),
-                got,
-            })
-        }
+        check_rows(self.n_antennas(), got)
     }
 
-    /// Checks that a signal frequency is finite and positive.
     fn check_frequency(frequency: f64) -> Result<()> {
-        if frequency.is_finite() && frequency > 0.0 {
-            Ok(())
-        } else {
-            Err(MusicError::InvalidFrequency(frequency))
-        }
+        check_frequency(frequency)
     }
 
-    /// Checks that `0 < n_sources < n_antennas`. Zero sources would make the noise
-    /// subspace the whole space and the spectrum meaningless.
     fn check_sources(&self, n_sources: usize) -> Result<()> {
-        if n_sources >= self.n_antennas() {
-            Err(MusicError::TooManySources {
-                n_sources,
-                n_antennas: self.n_antennas(),
-            })
-        } else if n_sources == 0 {
-            Err(MusicError::NoSources)
-        } else {
-            Ok(())
-        }
+        check_sources(n_sources, self.n_antennas())
     }
 
     // ─── Core algorithm ───────────────────────────────────────────────────────
@@ -588,28 +565,11 @@ impl MusicEstimator {
     /// antenna), so that the spectrum does not allocate a vector per angle.
     fn steering_vector_into(&self, angle: f64, frequency: f64, out: &mut [Cplx]) {
         let dir = [angle.cos(), angle.sin()];
-        // For f < Nyquist (sr/2): analytic signal has positive phase → use +exponent.
-        // For f > Nyquist: signal aliases in the one-sided FFT; dominant eigenvector
-        // phase is conjugated → use −exponent.
-        // At exactly Nyquist (f == sr/2): analytic signal is real; noise subspace is
-        // also real → use cos(phase) as a real steering vector.
-        let nyquist = self.sample_rate / 2.0;
-        let phase_sign = if frequency > nyquist {
-            -1.0_f64
-        } else {
-            1.0_f64
-        };
-        let at_nyquist = (frequency - nyquist).abs() < 0.5;
-        for (element, p) in out.iter_mut().zip(&self.antenna_positions) {
-            let delay = (p[0] * dir[0] + p[1] * dir[1]) / SPEED_OF_SOUND;
-            let phase = phase_sign * 2.0 * PI * frequency * delay;
-            *element = if at_nyquist {
-                // Real steering vector: imaginary part is zero
-                Cplx::new(phase.cos(), 0.0)
-            } else {
-                Cplx::from_polar(1.0, phase)
-            };
-        }
+        let delays = self
+            .antenna_positions
+            .iter()
+            .map(|p| (p[0] * dir[0] + p[1] * dir[1]) / SPEED_OF_SOUND);
+        steering_from_delays(delays, frequency, self.sample_rate, out);
     }
 
     /// Extracts the noise subspace from the Hermitian covariance matrix `cov`.
@@ -630,24 +590,7 @@ impl MusicEstimator {
     /// [`MusicError::TooManySources`] if `n_sources >= n_antennas`, and
     /// [`MusicError::NoSources`] if `n_sources` is 0.
     pub fn noise_subspace(&self, cov: &CMatrix, n_sources: usize) -> Result<CMatrix> {
-        let n = self.n_antennas();
-        if cov.shape() != (n, n) {
-            return Err(MusicError::CovarianceShape {
-                n_antennas: n,
-                rows: cov.nrows(),
-                cols: cov.ncols(),
-            });
-        }
-        self.check_sources(n_sources)?;
-        if !cov.iter().all(|c| c.re.is_finite() && c.im.is_finite()) {
-            return Err(MusicError::NonFiniteData);
-        }
-
-        // Eigenvectors in ascending eigenvalue order; the first n_noise columns are the
-        // noise subspace (smallest eigenvalues).
-        let (_eigenvalues, eigenvectors) = hermitian_eigen(cov);
-        let n_noise = cov.nrows() - n_sources;
-        Ok(eigenvectors.columns(0, n_noise).into())
+        noise_subspace(self.n_antennas(), cov, n_sources)
     }
 
     /// Generates the MUSIC pseudo-spectrum.
@@ -678,22 +621,7 @@ impl MusicEstimator {
             .iter()
             .map(|&theta| {
                 self.steering_vector_into(theta, frequency, &mut a);
-                // ‖Eₙᴴ a‖²: one inner product per noise eigenvector (column of noise_mat)
-                let denom: f64 = noise_mat
-                    .column_iter()
-                    .map(|e| {
-                        e.iter()
-                            .zip(&a)
-                            .map(|(e, a)| e.conj() * a)
-                            .sum::<Cplx>()
-                            .norm_sqr()
-                    })
-                    .sum();
-                if denom == 0.0 {
-                    f64::INFINITY
-                } else {
-                    1.0 / denom
-                }
+                music_score(noise_mat, &a)
             })
             .collect();
 
@@ -734,19 +662,7 @@ impl MusicEstimator {
         self.check_sources(n_sources)?;
         self.check_array()?;
         Self::check_frequency(frequency)?;
-        if data.ncols() == 0 {
-            return Err(MusicError::EmptyData);
-        }
-        if !data.iter().all(|c| c.re.is_finite() && c.im.is_finite()) {
-            return Err(MusicError::NonFiniteData);
-        }
-        let max_abs = data
-            .iter()
-            .fold(0.0, |m: f64, c| m.max(c.re.abs()).max(c.im.abs()));
-        let scale = power_of_two_scale(max_abs);
-        let data = data.map(|c| c / scale);
-        let n_samples = data.ncols() as f64;
-        let cov = (&data * data.adjoint()).scale(1.0 / n_samples);
+        let cov = complex_data_covariance(data)?;
         self.doa_from_covariance(&cov, n_sources, frequency)
     }
 
@@ -757,9 +673,7 @@ impl MusicEstimator {
         n_sources: usize,
         frequency: f64,
     ) -> Result<Vec<f64>> {
-        if cov.trace().re == 0.0 {
-            return Err(MusicError::SilentData);
-        }
+        check_not_silent(cov)?;
         let noise_mat = self.noise_subspace(cov, n_sources)?;
         let (scores, angles) = self.spectrum(&noise_mat, frequency)?;
         Ok(find_peaks(
@@ -823,21 +737,7 @@ impl MusicEstimator {
         self.check_sources(n_sources)?;
         self.check_array()?;
         Self::check_frequency(frequency)?;
-        let max_abs = check_real_samples(data)?;
-        let mut rows = scaled_rows(data, max_abs);
-        let (mut raw_energy, mut centred_energy) = (0.0, 0.0);
-        for row in &mut rows {
-            let mean = accurate_mean(row.iter());
-            for x in row.iter_mut() {
-                raw_energy += *x * *x;
-                *x -= mean;
-                centred_energy += *x * *x;
-            }
-        }
-        if centred_energy <= SILENCE_RATIO * raw_energy {
-            return Err(MusicError::SilentData);
-        }
-        let cov = analytic_covariance(&mut rows);
+        let cov = real_data_covariance(data)?;
         self.doa_from_covariance(&cov, n_sources, frequency)
     }
 
@@ -972,6 +872,174 @@ impl MusicEstimator {
             .collect();
         Ok((merged, angles_out))
     }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helpers shared with the 3-D estimator
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Checks that the data has one row per antenna.
+pub(crate) fn check_rows(expected: usize, got: usize) -> Result<()> {
+    if got == expected {
+        Ok(())
+    } else {
+        Err(MusicError::RowCountMismatch { expected, got })
+    }
+}
+
+/// Checks that a signal frequency is finite and positive.
+pub(crate) fn check_frequency(frequency: f64) -> Result<()> {
+    if frequency.is_finite() && frequency > 0.0 {
+        Ok(())
+    } else {
+        Err(MusicError::InvalidFrequency(frequency))
+    }
+}
+
+/// Checks that a sample rate is finite and positive.
+pub(crate) fn check_sample_rate(sample_rate: f64) -> Result<()> {
+    if sample_rate.is_finite() && sample_rate > 0.0 {
+        Ok(())
+    } else {
+        Err(MusicError::InvalidSampleRate(sample_rate))
+    }
+}
+
+/// Checks that `0 < n_sources < n_antennas`. Zero sources would make the noise
+/// subspace the whole space and the spectrum meaningless.
+pub(crate) fn check_sources(n_sources: usize, n_antennas: usize) -> Result<()> {
+    if n_sources >= n_antennas {
+        Err(MusicError::TooManySources {
+            n_sources,
+            n_antennas,
+        })
+    } else if n_sources == 0 {
+        Err(MusicError::NoSources)
+    } else {
+        Ok(())
+    }
+}
+
+/// [`MusicEstimator::noise_subspace`] for an array of `n` antennas.
+pub(crate) fn noise_subspace(n: usize, cov: &CMatrix, n_sources: usize) -> Result<CMatrix> {
+    if cov.shape() != (n, n) {
+        return Err(MusicError::CovarianceShape {
+            n_antennas: n,
+            rows: cov.nrows(),
+            cols: cov.ncols(),
+        });
+    }
+    check_sources(n_sources, n)?;
+    if !cov.iter().all(|c| c.re.is_finite() && c.im.is_finite()) {
+        return Err(MusicError::NonFiniteData);
+    }
+
+    // Eigenvectors in ascending eigenvalue order; the first n_noise columns are the
+    // noise subspace (smallest eigenvalues).
+    let (_eigenvalues, eigenvectors) = hermitian_eigen(cov);
+    let n_noise = cov.nrows() - n_sources;
+    Ok(eigenvectors.columns(0, n_noise).into())
+}
+
+/// Fails with [`MusicError::SilentData`] if the covariance has no power.
+pub(crate) fn check_not_silent(cov: &CMatrix) -> Result<()> {
+    if cov.trace().re == 0.0 {
+        Err(MusicError::SilentData)
+    } else {
+        Ok(())
+    }
+}
+
+/// Steering vector from the per-antenna delays `τⱼ` (seconds), written into `out`.
+///
+/// Element *j* is `exp(+i·2π·f·τⱼ)`, with the Nyquist handling described at
+/// [`MusicEstimator::steering_vector`].
+pub(crate) fn steering_from_delays(
+    delays: impl Iterator<Item = f64>,
+    frequency: f64,
+    sample_rate: f64,
+    out: &mut [Cplx],
+) {
+    // For f < Nyquist (sr/2): analytic signal has positive phase → use +exponent.
+    // For f > Nyquist: signal aliases in the one-sided FFT; dominant eigenvector
+    // phase is conjugated → use −exponent.
+    // At exactly Nyquist (f == sr/2): analytic signal is real; noise subspace is
+    // also real → use cos(phase) as a real steering vector.
+    let nyquist = sample_rate / 2.0;
+    let phase_sign = if frequency > nyquist {
+        -1.0_f64
+    } else {
+        1.0_f64
+    };
+    let at_nyquist = (frequency - nyquist).abs() < 0.5;
+    for (element, delay) in out.iter_mut().zip(delays) {
+        let phase = phase_sign * 2.0 * PI * frequency * delay;
+        *element = if at_nyquist {
+            // Real steering vector: imaginary part is zero
+            Cplx::new(phase.cos(), 0.0)
+        } else {
+            Cplx::from_polar(1.0, phase)
+        };
+    }
+}
+
+/// The MUSIC score `1 / ‖Eₙᴴ a‖²` of steering vector `a` (infinite if `a` is orthogonal
+/// to the noise subspace).
+pub(crate) fn music_score(noise_mat: &CMatrix, a: &[Cplx]) -> f64 {
+    // ‖Eₙᴴ a‖²: one inner product per noise eigenvector (column of noise_mat)
+    let denom: f64 = noise_mat
+        .column_iter()
+        .map(|e| {
+            e.iter()
+                .zip(a)
+                .map(|(e, a)| e.conj() * a)
+                .sum::<Cplx>()
+                .norm_sqr()
+        })
+        .sum();
+    if denom == 0.0 {
+        f64::INFINITY
+    } else {
+        1.0 / denom
+    }
+}
+
+/// Covariance of complex array data, after checking it is non-empty and finite. The data
+/// is scaled by a power of two first, so that the products neither overflow nor underflow.
+pub(crate) fn complex_data_covariance(data: &CMatrix) -> Result<CMatrix> {
+    if data.ncols() == 0 {
+        return Err(MusicError::EmptyData);
+    }
+    if !data.iter().all(|c| c.re.is_finite() && c.im.is_finite()) {
+        return Err(MusicError::NonFiniteData);
+    }
+    let max_abs = data
+        .iter()
+        .fold(0.0, |m: f64, c| m.max(c.re.abs()).max(c.im.abs()));
+    let scale = power_of_two_scale(max_abs);
+    let data = data.map(|c| c / scale);
+    let n_samples = data.ncols() as f64;
+    Ok((&data * data.adjoint()).scale(1.0 / n_samples))
+}
+
+/// Covariance of the analytic signals of real array data, each channel's mean removed (see
+/// [`MusicEstimator::estimate_doa_from_real`]).
+pub(crate) fn real_data_covariance(data: &DMatrix<f64>) -> Result<CMatrix> {
+    let max_abs = check_real_samples(data)?;
+    let mut rows = scaled_rows(data, max_abs);
+    let (mut raw_energy, mut centred_energy) = (0.0, 0.0);
+    for row in &mut rows {
+        let mean = accurate_mean(row.iter());
+        for x in row.iter_mut() {
+            raw_energy += *x * *x;
+            *x -= mean;
+            centred_energy += *x * *x;
+        }
+    }
+    if centred_energy <= SILENCE_RATIO * raw_energy {
+        return Err(MusicError::SilentData);
+    }
+    Ok(analytic_covariance(&mut rows))
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1605,6 +1673,21 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn find_peaks_equal_heights_ordered_by_angle() {
+        let angles: Vec<f64> = (0..8).map(|i| i as f64).collect();
+        let scores = [0.0, 1.0, 0.0, 3.0, 0.0, 3.0, 0.0, 3.0];
+        assert_eq!(
+            find_peaks(&scores, &angles, 4, false),
+            vec![3.0, 5.0, 7.0, 1.0]
+        );
+        // On the circle the run at the end is a peak too (its neighbour 0 is lower)
+        assert_eq!(
+            find_peaks(&scores, &angles, 4, true),
+            vec![3.0, 5.0, 7.0, 1.0]
+        );
     }
 
     #[test]
