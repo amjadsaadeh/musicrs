@@ -34,6 +34,9 @@
 //!
 //! Use [`MusicEstimator::estimate_doa`] directly if you already have complex data, and
 //! [`MusicEstimator::ifb_music_spectrum`] for the wideband (IFB) variant.
+//!
+//! For directions in 3-D (azimuth and elevation, with `[x, y, z]` antenna positions) use
+//! [`MusicEstimator3d`]; see the [`music3d`] module for the conventions.
 
 pub mod error;
 pub mod music;
