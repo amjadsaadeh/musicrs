@@ -3,7 +3,10 @@
 use std::fmt;
 
 /// Why a musicrs function could not produce a result.
+///
+/// New variants may be added in minor releases, so a `match` on it needs a `_` arm.
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub enum MusicError {
     /// The data (or noise subspace) has the wrong number of rows: one per antenna is
     /// expected.
