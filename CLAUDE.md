@@ -42,7 +42,7 @@ tests/
 ├── broadband_test.rs            # IFB-MUSIC on composite multi-tone signals; two sources at different angles
 ├── noisy_data_test.rs           # Narrowband and IFB (energy-selected bins) DOA with added white noise
 ├── synthetic_test.rs            # Synthetic plane waves: 2-D arrays, 2–3 sources, coherent sources (not resolved), endfire, edge cases, 48 kHz
-├── music3d_test.rs              # 3-D on synthetic far-field plane waves (tetrahedron, octahedron, planar mirror), azimuth seam / shifted intervals, exact match with 2-D on the recordings
+├── music3d_test.rs              # 3-D on synthetic far-field plane waves (tetrahedron, octahedron, planar mirror), azimuth seam / shifted intervals, exact match with 2-D on the recordings; IFB (single tone, energy-selected bins, two sources, exact match with 2-D IFB)
 ├── golden/                      # pyMUSIC reference CSVs, *.musicrs.csv snapshots, generate_golden.py
 └── data/single-source/*.wav     # 4-channel 24-bit 16kHz test recordings
 examples/bench_pymusic.rs        # musicrs side of the runtime benchmark vs pyMUSIC
@@ -59,7 +59,7 @@ docs/benchmark*.svg              # charts shown in the README (light and dark), 
 - `analytic_signal()` — converts real signal to complex via Hilbert transform (FFT-based)
 - `stft()` — Short-Time Fourier Transform with configurable window and overlap
 
-- `MusicEstimator3d` — 3-D counterpart with `[x, y, z]` positions; returns `Direction { azimuth, elevation }`. Elevation is from the x-y plane, in [−π/2, π/2]; the elevation grid holds cell centres (never the poles). Peak picking connects, towards the poles, points as many azimuth steps apart as span one elevation step. With z = 0 and a one-row elevation grid at 0 it reproduces `MusicEstimator` bit for bit (`matches_2d_estimator_on_recordings`). Narrowband only so far; IFB-MUSIC in 3-D is planned as a separate change
+- `MusicEstimator3d` — 3-D counterpart with `[x, y, z]` positions; returns `Direction { azimuth, elevation }`. Elevation is from the x-y plane, in [−π/2, π/2]; the elevation grid holds cell centres (never the poles). Peak picking connects, towards the poles, points as many azimuth steps apart as span one elevation step. With z = 0 and a one-row elevation grid at 0 it reproduces `MusicEstimator` bit for bit (`matches_2d_estimator_on_recordings`). `ifb_music_spectrum` shares its preprocessing and merge with 2-D (`music::ifb_geometric_mean`, per-bin spectrum as a callback); `find_peaks` picks peaks on any spectrum of the estimator's grid
 - `MusicError` — bad data (wrong row count or covariance shape, no samples, NaN/inf, silence) and bad parameters (too many or zero sources, angle grid incl. spans over 2π, elevation grid past the poles, frequency ≤ 0 or non-finite, sample rate, antenna positions, `nfft`, overlap, threshold, no usable bins) are returned as `Err` (the enum is `#[non_exhaustive]`); the public API does not panic on them and does not return a quiet wrong answer. The estimator's fields are checked where they are used, not in `new()`, because the fields are public. `noise_subspace` reads only the lower triangle of `cov`; IFB never uses the DC bin
 
 **Core algorithm flow:**

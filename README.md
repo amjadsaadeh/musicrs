@@ -15,8 +15,8 @@ for empirical investigations of MUSIC in my master thesis. Pure Rust, no LAPACK.
   `getSourceAngles` clustered all estimates around the first peak; this is fixed here.
 - IFB-MUSIC (wideband): per-bin cross-spectral matrices from an STFT, narrowband spectra
   combined by geometric mean.
-- 3-D narrowband MUSIC (`MusicEstimator3d`): azimuth and elevation for `[x, y, z]` arrays,
-  on a regular azimuth × elevation grid.
+- 3-D MUSIC (`MusicEstimator3d`): azimuth and elevation for `[x, y, z]` arrays, on a regular
+  azimuth × elevation grid, narrowband and IFB-MUSIC.
 - FFT-based analytic signal (Hilbert transform) and STFT helpers.
 
 ## Usage
@@ -62,6 +62,10 @@ println!(
     directions[0].azimuth.to_degrees(),
     directions[0].elevation.to_degrees()
 );
+
+// Wideband: IFB-MUSIC spectrum over chosen bins, then its peaks
+let spectrum = estimator.ifb_music_spectrum(&data, 160, 1, Some(&[10]))?;
+let directions = estimator.find_peaks(&spectrum, 1);
 ```
 
 Azimuth is measured in the x-y plane from +x towards +y (as in 2-D), elevation from the x-y

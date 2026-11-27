@@ -26,8 +26,8 @@ use num_complex::Complex;
 use crate::error::{MusicError, Result};
 use crate::music::{
     SPEED_OF_SOUND, check_frequency, check_not_silent, check_rows, check_sample_rate,
-    check_sources, complex_data_covariance, music_score, noise_subspace, real_data_covariance,
-    steering_from_delays,
+    check_sources, complex_data_covariance, ifb_geometric_mean, music_score, noise_subspace,
+    real_data_covariance, steering_from_delays,
 };
 
 type Cplx = Complex<f64>;
@@ -303,6 +303,65 @@ impl MusicEstimator3d {
         self.doa_from_covariance(&cov, n_sources, frequency)
     }
 
+    /// Integrated Frequency-Band (IFB) MUSIC spectrum over the azimuth × elevation grid: a
+    /// narrowband spectrum per STFT bin, merged by geometric mean.
+    ///
+    /// The data, `nfft`, `bins` and the bin handling are as in
+    /// [`MusicEstimator::ifb_music_spectrum`](crate::MusicEstimator::ifb_music_spectrum)
+    /// (non-overlapping windows; DC, bins above `nfft / 2` and bins without power are
+    /// skipped; each bin counts once). Use [`find_peaks`](Self::find_peaks) for the
+    /// directions.
+    ///
+    /// # Errors
+    /// As [`MusicEstimator::ifb_music_spectrum`](crate::MusicEstimator::ifb_music_spectrum),
+    /// plus [`MusicError::InvalidElevationGrid`].
+    pub fn ifb_music_spectrum(
+        &self,
+        data: &DMatrix<f64>,
+        nfft: usize,
+        n_sources: usize,
+        bins: Option<&[usize]>,
+    ) -> Result<Spectrum3d> {
+        check_rows(self.n_antennas(), data.nrows())?;
+        check_sources(n_sources, self.n_antennas())?;
+        self.check_array()?;
+        let mut grid: Option<(Vec<f64>, Vec<f64>)> = None;
+        let merged = ifb_geometric_mean(
+            data,
+            nfft,
+            n_sources,
+            bins,
+            self.sample_rate,
+            self.n_antennas(),
+            |noise_mat, frequency| {
+                let spectrum = self.spectrum(noise_mat, frequency)?;
+                // Column-major, as DMatrix::from_vec reads it back
+                let values = spectrum.values.as_slice().to_vec();
+                grid = Some((spectrum.azimuths, spectrum.elevations));
+                Ok(values)
+            },
+        )?;
+        let (azimuths, elevations) =
+            grid.expect("ifb_geometric_mean returns a spectrum only after computing one");
+        Ok(Spectrum3d {
+            values: DMatrix::from_vec(elevations.len(), azimuths.len(), merged),
+            azimuths,
+            elevations,
+        })
+    }
+
+    /// The `n` highest peaks of a `spectrum` computed with this estimator's grid (e.g. from
+    /// [`ifb_music_spectrum`](Self::ifb_music_spectrum)), highest first, picked as
+    /// [`estimate_doa`](Self::estimate_doa) picks them.
+    pub fn find_peaks(&self, spectrum: &Spectrum3d, n: usize) -> Vec<Direction> {
+        find_peaks_2d(
+            spectrum,
+            self.azimuth_interval,
+            n,
+            self.covers_full_circle(),
+        )
+    }
+
     fn doa_from_covariance(
         &self,
         cov: &CMatrix,
@@ -312,12 +371,7 @@ impl MusicEstimator3d {
         check_not_silent(cov)?;
         let noise_mat = self.noise_subspace(cov, n_sources)?;
         let spectrum = self.spectrum(&noise_mat, frequency)?;
-        Ok(find_peaks_2d(
-            &spectrum,
-            self.azimuth_interval,
-            n_sources,
-            self.covers_full_circle(),
-        ))
+        Ok(self.find_peaks(&spectrum, n_sources))
     }
 }
 
