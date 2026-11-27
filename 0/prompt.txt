@@ -1,0 +1,5 @@
+create a plan to extend this with 3d doa estimation
+
+---
+
+1. proposal is good as it is. 2. use as recommended. take tests for angle overflow into account. 3. regular grid. 4. work in different prs 5. unfortunalty not, generate data on your behalf using a far field/flat field model for propagation. 6. version bump. 7. create a new branch.  additinal thing: first create tests then go on with the real imeplemtnation. use dynamic workflow on your own behalf.
