@@ -10,7 +10,7 @@ use crate::error::{MusicError, Result};
 use crate::stft::{real_fft_plan, stft};
 
 /// Speed of sound in air at ~20 °C, in metres per second.
-const SPEED_OF_SOUND: f64 = 343.2;
+pub(crate) const SPEED_OF_SOUND: f64 = 343.2;
 
 /// Power ratio (−260 dB) below which a signal counts as silent: above the rounding residue
 /// left by removing a constant offset or by FFT leakage from an on-bin tone (about
@@ -95,7 +95,7 @@ fn hermitian_eigen(mat: &CMatrix) -> (Vec<f64>, CMatrix) {
 /// with only one neighbour each, so a spectrum still rising at an end of the range peaks
 /// there. A spectrum that is constant over a grid of two or more points has no peak; a
 /// one-point open grid peaks at its only point.
-fn find_peaks(scores: &[f64], angles: &[f64], n: usize, circular: bool) -> Vec<f64> {
+pub(crate) fn find_peaks(scores: &[f64], angles: &[f64], n: usize, circular: bool) -> Vec<f64> {
     let len = scores.len();
     if len == 0 || n == 0 {
         return Vec::new();

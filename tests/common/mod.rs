@@ -145,3 +145,92 @@ impl ErrorLog {
         );
     }
 }
+
+// ─── Far-field (plane-wave) model for 3-D arrays ─────────────────────────────
+
+pub const SPEED_OF_SOUND: f64 = 343.2;
+
+/// Unit vector pointing towards the source at `azimuth` (from +x towards +y) and
+/// `elevation` (from the x-y plane towards +z), both in degrees.
+pub fn unit_direction(azimuth_deg: f64, elevation_deg: f64) -> [f64; 3] {
+    let (az, el) = (azimuth_deg.to_radians(), elevation_deg.to_radians());
+    [el.cos() * az.cos(), el.cos() * az.sin(), el.sin()]
+}
+
+/// Time by which a plane wave from `(azimuth_deg, elevation_deg)` reaches `p` ahead of
+/// the origin (far field: the wavefront is flat across the array).
+pub fn advance_3d(p: [f64; 3], azimuth_deg: f64, elevation_deg: f64) -> f64 {
+    let u = unit_direction(azimuth_deg, elevation_deg);
+    (p[0] * u[0] + p[1] * u[1] + p[2] * u[2]) / SPEED_OF_SOUND
+}
+
+/// Great-circle distance in degrees between two directions given as
+/// `(azimuth_deg, elevation_deg)`.
+pub fn great_circle_deg(a: (f64, f64), b: (f64, f64)) -> f64 {
+    let (u, v) = (unit_direction(a.0, a.1), unit_direction(b.0, b.1));
+    let dot = u[0] * v[0] + u[1] * v[1] + u[2] * v[2];
+    dot.clamp(-1.0, 1.0).acos().to_degrees()
+}
+
+/// Deterministic pseudo-random values in [0, 1) (LCG).
+pub fn uniform(n: usize, seed: u64) -> Vec<f64> {
+    let mut state = seed;
+    (0..n)
+        .map(|_| {
+            state = state
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            (state >> 11) as f64 / (1u64 << 53) as f64
+        })
+        .collect()
+}
+
+/// A real-valued tone at `freq` from one far-field source, sampled at `sample_rate`.
+pub fn plane_wave_real(
+    positions: &[[f64; 3]],
+    source_deg: (f64, f64),
+    freq: f64,
+    sample_rate: f64,
+    n_samples: usize,
+) -> DMatrix<f64> {
+    DMatrix::from_fn(positions.len(), n_samples, |m, t| {
+        let tau = advance_3d(positions[m], source_deg.0, source_deg.1);
+        (2.0 * std::f64::consts::PI * freq * (t as f64 / sample_rate + tau)).cos()
+    })
+}
+
+/// Complex (analytic) data of several uncorrelated far-field sources at `freq`, plus
+/// complex white noise of amplitude `noise`. Every source but the first gets an
+/// independent random phase per sample, which decorrelates it from the others.
+pub fn plane_waves_complex(
+    positions: &[[f64; 3]],
+    sources_deg: &[(f64, f64)],
+    freq: f64,
+    sample_rate: f64,
+    n_samples: usize,
+    noise: f64,
+    seed: u64,
+) -> DMatrix<num_complex::Complex<f64>> {
+    use num_complex::Complex;
+    use std::f64::consts::PI;
+    let jitter = uniform(sources_deg.len() * n_samples, seed);
+    let white = uniform(2 * positions.len() * n_samples, seed + 1);
+    DMatrix::from_fn(positions.len(), n_samples, |m, t| {
+        let t_s = t as f64 / sample_rate;
+        let signal: Complex<f64> = sources_deg
+            .iter()
+            .enumerate()
+            .map(|(k, &(az, el))| {
+                let phi = if k == 0 {
+                    0.0
+                } else {
+                    2.0 * PI * jitter[k * n_samples + t]
+                };
+                let tau = advance_3d(positions[m], az, el);
+                Complex::from_polar(1.0, 2.0 * PI * freq * (t_s + tau) + phi)
+            })
+            .sum();
+        let i = 2 * (m * n_samples + t);
+        signal + Complex::new(white[i] - 0.5, white[i + 1] - 0.5).scale(noise)
+    })
+}

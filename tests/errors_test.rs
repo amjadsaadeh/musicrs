@@ -1,8 +1,11 @@
 // Every error the public API returns, one test per function.
 
-use musicrs::{MusicError, MusicEstimator, select_bins_by_energy, stft};
+use musicrs::{
+    Direction, MusicError, MusicEstimator, MusicEstimator3d, select_bins_by_energy, stft,
+};
 use nalgebra::DMatrix;
 use num_complex::Complex;
+use std::f64::consts::FRAC_PI_2;
 use std::f64::consts::PI;
 
 const NFFT: usize = 160;
@@ -464,6 +467,14 @@ fn every_error_message() {
              interval with start < end spanning at most 2π",
         ),
         (
+            MusicError::InvalidElevationGrid {
+                elevation_steps: 0,
+                elevation_interval: (0.0, 2.0),
+            },
+            "invalid elevation grid: 0 steps over (0, 2); need at least one step and a \
+             finite interval with start < end within [-π/2, π/2]",
+        ),
+        (
             MusicError::InvalidFrequency(-1000.0),
             "frequency must be finite and positive, got -1000 Hz",
         ),
@@ -527,4 +538,214 @@ fn errors_display_and_convert() {
         TOO_MANY.to_string(),
         "4 sources requested, but at most 3 fit 4 antennas"
     );
+}
+
+// ─── MusicEstimator3d ────────────────────────────────────────────────────────
+
+fn tetrahedron() -> MusicEstimator3d {
+    let a = 0.03;
+    MusicEstimator3d::new(
+        vec![[a, a, a], [a, -a, -a], [-a, a, -a], [-a, -a, a]],
+        16000.0,
+    )
+}
+
+#[test]
+fn estimator_3d_data_errors() {
+    let est = tetrahedron();
+    let doa = |data: &DMatrix<f64>, n_sources| est.estimate_doa_from_real(data, n_sources, 1000.0);
+    assert_eq!(
+        doa(&DMatrix::zeros(3, 100), 1),
+        Err(MusicError::RowCountMismatch {
+            expected: 4,
+            got: 3
+        })
+    );
+    assert_eq!(doa(&DMatrix::zeros(4, 0), 1), Err(MusicError::EmptyData));
+    assert_eq!(
+        doa(&with_nan(tone(1000)), 1),
+        Err(MusicError::NonFiniteData)
+    );
+    assert_eq!(
+        doa(&DMatrix::zeros(4, 1000), 1),
+        Err(MusicError::SilentData)
+    );
+    assert_eq!(
+        doa(&DMatrix::from_element(4, 1000, 0.3), 1),
+        Err(MusicError::SilentData)
+    );
+    assert_eq!(doa(&tone(1000), 4), Err(TOO_MANY));
+    assert_eq!(doa(&tone(1000), 0), Err(MusicError::NoSources));
+    assert_eq!(
+        est.estimate_doa_from_real(&tone(1000), 1, 0.0),
+        Err(MusicError::InvalidFrequency(0.0))
+    );
+
+    let complex = |data: &DMatrix<Complex<f64>>| est.estimate_doa(data, 1, 1000.0);
+    assert_eq!(
+        complex(&DMatrix::from_element(3, 100, Complex::new(1.0, 0.5))),
+        Err(MusicError::RowCountMismatch {
+            expected: 4,
+            got: 3
+        })
+    );
+    assert_eq!(complex(&DMatrix::zeros(4, 0)), Err(MusicError::EmptyData));
+    let mut nan = DMatrix::from_element(4, 100, Complex::new(1.0, 0.5));
+    nan[(1, 1)] = Complex::new(0.0, f64::NAN);
+    assert_eq!(complex(&nan), Err(MusicError::NonFiniteData));
+    assert_eq!(
+        complex(&DMatrix::zeros(4, 100)),
+        Err(MusicError::SilentData)
+    );
+    assert!(matches!(
+        est.estimate_doa(&DMatrix::from_element(4, 100, Complex::new(1.0, 0.5)), 1, f64::NAN),
+        Err(MusicError::InvalidFrequency(f)) if f.is_nan()
+    ));
+}
+
+#[test]
+fn estimator_3d_subspace_and_spectrum_errors() {
+    let est = tetrahedron();
+    assert_eq!(
+        est.noise_subspace(&DMatrix::zeros(3, 3), 1),
+        Err(MusicError::CovarianceShape {
+            n_antennas: 4,
+            rows: 3,
+            cols: 3
+        })
+    );
+    assert_eq!(
+        est.noise_subspace(&DMatrix::identity(4, 4), 4),
+        Err(TOO_MANY)
+    );
+    let mut nan = DMatrix::<Complex<f64>>::identity(4, 4);
+    nan[(2, 1)] = Complex::new(f64::NAN, 0.0);
+    assert_eq!(est.noise_subspace(&nan, 1), Err(MusicError::NonFiniteData));
+    assert_eq!(
+        est.spectrum(&DMatrix::zeros(3, 2), 1000.0).map(|_| ()),
+        Err(MusicError::RowCountMismatch {
+            expected: 4,
+            got: 3
+        })
+    );
+    assert_eq!(
+        est.spectrum(&DMatrix::zeros(4, 2), -5.0).map(|_| ()),
+        Err(MusicError::InvalidFrequency(-5.0))
+    );
+}
+
+#[test]
+fn estimator_3d_array_errors() {
+    let data = tone(1000);
+    let mut bad_z = tetrahedron();
+    bad_z.antenna_positions[2][2] = f64::NAN;
+    assert_eq!(
+        bad_z.estimate_doa_from_real(&data, 1, 1000.0),
+        Err(MusicError::InvalidAntennaPosition { index: 2 })
+    );
+    let mut bad_x = tetrahedron();
+    bad_x.antenna_positions[0][0] = f64::INFINITY;
+    assert_eq!(
+        bad_x.estimate_doa_from_real(&data, 1, 1000.0),
+        Err(MusicError::InvalidAntennaPosition { index: 0 })
+    );
+    for sr in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+        let est = MusicEstimator3d {
+            sample_rate: sr,
+            ..tetrahedron()
+        };
+        assert!(matches!(
+            est.estimate_doa_from_real(&data, 1, 1000.0),
+            Err(MusicError::InvalidSampleRate(_))
+        ));
+    }
+}
+
+/// Azimuth intervals spanning more than 2π, elevation intervals reaching past the poles,
+/// reversed or non-finite intervals and empty grids are rejected; intervals that end
+/// exactly on ±π/2 or span exactly 2π (or a rounding error more) are accepted.
+#[test]
+fn estimator_3d_angle_overflow() {
+    let data = tone(1000);
+    let azimuth = |steps: usize, interval: (f64, f64)| {
+        MusicEstimator3d {
+            azimuth_steps: steps,
+            azimuth_interval: interval,
+            ..tetrahedron()
+        }
+        .estimate_doa_from_real(&data, 1, 1000.0)
+    };
+    let elevation = |steps: usize, interval: (f64, f64)| {
+        MusicEstimator3d {
+            elevation_steps: steps,
+            elevation_interval: interval,
+            ..tetrahedron()
+        }
+        .estimate_doa_from_real(&data, 1, 1000.0)
+    };
+
+    for (steps, interval) in [
+        (0, (0.0, 2.0 * PI)),
+        (360, (0.0, 2.0 * PI + 0.01)),
+        (360, (-PI, 3.0 * PI)),
+        (360, (1.0, 1.0)),
+        (360, (2.0, 1.0)),
+        (360, (f64::NAN, 1.0)),
+        (360, (0.0, f64::INFINITY)),
+        (360, (f64::NEG_INFINITY, 0.0)),
+    ] {
+        // Compared bit for bit, so that a NaN end matches itself
+        let got = azimuth(steps, interval);
+        assert!(
+            matches!(got, Err(MusicError::InvalidAngleGrid {
+                angle_steps_num,
+                search_interval: (s, e),
+            }) if angle_steps_num == steps
+                && s.to_bits() == interval.0.to_bits()
+                && e.to_bits() == interval.1.to_bits()),
+            "azimuth {steps} over {interval:?}: {got:?}"
+        );
+    }
+    for (steps, interval) in [
+        (0, (-FRAC_PI_2, FRAC_PI_2)),
+        (180, (-FRAC_PI_2 - 0.01, FRAC_PI_2)),
+        (180, (-FRAC_PI_2, FRAC_PI_2 + 0.01)),
+        (180, (0.0, PI)),
+        (180, (-PI, 0.0)),
+        (180, (0.5, 0.5)),
+        (180, (FRAC_PI_2, -FRAC_PI_2)),
+        (180, (f64::NAN, 0.0)),
+        (180, (0.0, f64::INFINITY)),
+    ] {
+        let got = elevation(steps, interval);
+        assert!(
+            matches!(got, Err(MusicError::InvalidElevationGrid {
+                elevation_steps,
+                elevation_interval: (s, e),
+            }) if elevation_steps == steps
+                && s.to_bits() == interval.0.to_bits()
+                && e.to_bits() == interval.1.to_bits()),
+            "elevation {steps} over {interval:?}: {got:?}"
+        );
+    }
+
+    // Exactly the full circle and both poles, and the same off by a rounding error
+    assert!(azimuth(360, (-PI, PI)).is_ok());
+    assert!(azimuth(360, (0.0, 2.0 * PI + 1e-12)).is_ok());
+    assert!(elevation(180, (-FRAC_PI_2, FRAC_PI_2)).is_ok());
+    assert!(elevation(180, (-FRAC_PI_2 - 1e-12, FRAC_PI_2 + 1e-12)).is_ok());
+}
+
+#[test]
+fn estimator_3d_steering_vector() {
+    let est = tetrahedron();
+    let sv = est.steering_vector(
+        Direction {
+            azimuth: 0.3,
+            elevation: -0.4,
+        },
+        1000.0,
+    );
+    assert_eq!(sv.len(), 4);
+    assert!(sv.iter().all(|c| (c.norm() - 1.0).abs() < 1e-12));
 }

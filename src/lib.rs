@@ -37,8 +37,10 @@
 
 pub mod error;
 pub mod music;
+pub mod music3d;
 pub mod stft;
 
 pub use error::MusicError;
 pub use music::{MusicEstimator, select_bins_by_energy};
+pub use music3d::{Direction, MusicEstimator3d, Spectrum3d};
 pub use stft::{analytic_signal, stft};
